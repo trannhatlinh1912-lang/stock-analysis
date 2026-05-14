@@ -1,0 +1,11 @@
+{
+  "ticker": "BSR",
+  "date": "2026-05-15",
+  "contradictions": [],
+  "checks_performed": {
+    "growth_vs_cagr": true,
+    "margin_vs_actual": false,
+    "wacc_vs_risk": true
+  },
+  "note": "0 contradiction(s) found"
+}

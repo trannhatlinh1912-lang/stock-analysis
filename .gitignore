@@ -1,8 +1,6 @@
 # Generated data snapshots (per-run, contain API responses)
 data/
 
-# Generated reports and summaries (per-run artifacts)
-output/
 
 # Python
 __pycache__/

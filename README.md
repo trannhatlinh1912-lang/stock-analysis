@@ -39,7 +39,7 @@ Workflow phân tích cổ phiếu tự động dùng 3 sub-agents tuần tự, t
 ```
 .
 ├── .claude/
-│   ├── agent/                  # Định nghĩa 3 sub-agents
+│   ├── agents/                  # Định nghĩa 3 sub-agents
 │   │   ├── fundamental-agent.md
 │   │   ├── valuation-agent.md
 │   │   └── report-agent.md

@@ -15,6 +15,7 @@ from datetime import datetime
 
 WORKSPACE = os.path.expanduser("~/.claude/workspace/stock-analysis")
 OUTPUT_DIR = os.path.join(WORKSPACE, "output")
+DATA_DIR   = os.path.join(WORKSPACE, "data")
 
 REPORT_PATTERNS = {
     "macro":      ["macro_report_*.md"],
@@ -34,6 +35,75 @@ CONTRADICTION_THRESHOLDS = {
     "margin_diff_max_pp": 20.0,  # absolute margin diff > 20pp → flag
     "wacc_high_risk_min": 12.0,  # if risk=HIGH and WACC < this → flag
 }
+
+def _score_band(total) -> str:
+    if total is None: return "[missing_data]"
+    if total >= 8.0: return "Mạnh"
+    if total >= 6.0: return "Khá"
+    if total >= 4.0: return "Trung bình"
+    return "Yếu"
+
+
+def _read_snapshot(ticker: str, snap_type: str, date: str) -> dict:
+    fname = f"macro_snapshot_{date}.json" if snap_type == "macro" else f"{snap_type}_snapshot_{ticker}_{date}.json"
+    try:
+        with open(os.path.join(DATA_DIR, fname), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _supplement_from_snapshots(analyses: dict, ticker: str, date: str) -> dict:
+    """Enrich analyses with structured data read directly from data snapshot JSONs."""
+    # Financial snapshot
+    fin_snap = _read_snapshot(ticker, "financial", date)
+    if fin_snap:
+        fin = analyses.setdefault("financials", {})
+        fs      = fin_snap.get("financial_score", {})
+        income  = fin_snap.get("income", {})
+        cf      = fin_snap.get("cashflow", {})
+        derived = fin_snap.get("derived", {})
+        if fs.get("total") is not None:
+            fin["score"]      = fs["total"]
+            fin["score_band"] = _score_band(fs["total"])
+            if fin.get("verdict") in ("[missing_data]", None, ""):
+                fin["verdict"] = _score_band(fs["total"])
+        metrics = {}
+        for k, src in [("revenue_cagr_2y", income), ("revenue_yoy", income),
+                       ("net_margin_pct", income), ("fcf_4q_b", cf),
+                       ("interest_coverage", derived)]:
+            src_key = {"revenue_yoy": "revenue_yoy_latest", "net_margin_pct": "net_margin_latest",
+                       "fcf_4q_b": "fcf_4q_sum_b", "interest_coverage": "interest_coverage"}.get(k, k)
+            val = src.get(src_key)
+            if val is not None:
+                metrics[k] = val
+        if metrics:
+            fin["snapshot_metrics"] = metrics
+        red_flags = fin_snap.get("red_flags", [])
+        if red_flags:
+            fin["red_flags_count"] = len(red_flags)
+            fin["red_flags_high"]  = sum(1 for f in red_flags if f.get("severity") == "high")
+        analyses["financials"] = fin
+
+    # Risk snapshot
+    risk_snap = _read_snapshot(ticker, "risk", date)
+    if risk_snap:
+        risk  = analyses.setdefault("risk", {})
+        debt  = risk_snap.get("debt_snapshot", {})
+        own   = risk_snap.get("ownership", {})
+        metrics = {}
+        for k in ("de_ratio", "coverage", "total_debt_b", "net_debt_b"):
+            if debt.get(k) is not None:
+                metrics[k] = debt[k]
+        for k in ("top1_pct", "top5_pct", "hhi_top5"):
+            if own.get(k) is not None:
+                metrics[k] = own[k]
+        if metrics:
+            risk["snapshot_metrics"] = metrics
+        analyses["risk"] = risk
+
+    return analyses
+
 
 def find_latest(patterns: list[str], ticker: str) -> str | None:
     candidates = []
@@ -256,6 +326,8 @@ def summarize_mode(ticker: str, stage: str) -> dict:
         "analyses": {k: full["analyses"].get(k, {"verdict": "[missing_data]", "key_points": []})
                      for k in keys},
     }
+
+    summary["analyses"] = _supplement_from_snapshots(summary["analyses"], ticker, date_str)
 
     out_path = os.path.join(OUTPUT_DIR, f"{stage}_summary_{ticker}_{date_str}.json")
     with open(out_path, "w", encoding="utf-8") as f:

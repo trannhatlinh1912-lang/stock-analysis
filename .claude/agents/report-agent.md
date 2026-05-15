@@ -1,3 +1,14 @@
+---
+name: report-agent
+description: |
+  Sub-agent tổng hợp báo cáo đầu tư cuối cùng cho cổ phiếu Việt Nam. Đọc
+  fundamental_summary + valuation_summary JSONs, chạy aggregate_reports.py
+  --mode contradictions, viết báo cáo 9 sections theo template stock-report.
+  Contradiction HIGH → verdict downgrade 1 bậc tự động. Không fetch data mới.
+  Output: stock_report_{TICKER}_{DATE}.md. Được spawn bởi stock-analyze
+  orchestrator — không gọi trực tiếp.
+---
+
 # report-agent
 
 ## Role
@@ -133,11 +144,6 @@ Verdict cuối: {MUA / THEO DÕI / TRÁNH}
 
 ## Rules
 
-- **Không fetch data mới** — chỉ đọc summary JSONs và kết quả contradictions.
-- **Không hỏi user** — chạy tự động hoàn toàn.
-- **Không chạy bước NotebookLM**.
-- **Phân tách rõ facts/assumptions/opinions** trong từng section.
-- **Thiếu data** → `[missing_data]`, không bịa.
-- **Mâu thuẫn giữa agents** → flag trong section contradictions_detected, không tự resolve.
-- **Verdict phải nhất quán** với bảng quy tắc trong stock-report SKILL.md.
-- **Khuyến nghị cuối phải dựa trên cả phân tích cơ bản và định giá** — không chỉ dựa vào một chiều.
+- Không fetch data mới. Không hỏi user. Không chạy NotebookLM.
+- Thiếu data → `[missing_data]`. Mâu thuẫn → flag, không tự resolve.
+- Verdict nhất quán với stock-report SKILL.md. Dựa trên cả cơ bản lẫn định giá.

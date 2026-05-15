@@ -1,120 +1,84 @@
 ---
 name: stock-analyze
 description: |
-  Workflow phân tích cổ phiếu Việt Nam toàn diện bằng 3 sub-agents tuần tự:
-  Fundamental Agent (macro/industry/business/financials/risk/technical),
-  Valuation Agent (định giá dựa trên nền fundamental), và Report Agent
-  (tổng hợp + flag mâu thuẫn giữa agents). Trigger: /stock-analyze {TICKER}.
+  Workflow phân tích cổ phiếu Việt Nam toàn diện bằng 2 sub-agents tuần tự.
+  Trigger khi user gõ /stock-analyze, hỏi "phân tích toàn diện", "full analysis",
+  "phân tích cổ phiếu", "analyze stock", "chạy full workflow", "phân tích đầy đủ",
+  "comprehensive analysis". Skill nhận ticker (HPG, VCB, BSR...) hoặc tên công ty.
+  Agent 1 (Fundamental): macro → industry → business → financials → risk → technical.
+  Agent 2 (Valuation+Report): định giá + contradictions + báo cáo cuối.
+  Cache-aware: skip agents nếu output cùng ngày đã tồn tại.
   Output: output/stock_report_{TICKER}_{DATE}.md + 3 summary JSONs.
+  Contradiction HIGH → verdict downgrade 1 bậc tự động.
 ---
 
 # stock-analyze
 
 ## Bước 1: Parse Input và Setup
 
-Xác định ticker và ngày:
 ```
 TICKER = {input viết hoa}
 TODAY  = {YYYY-MM-DD hôm nay}
-BASE_DIR = ~/.claude/workspace/stock-analysis
+BASE_DIR = /Users/trannhatlinh/.claude/workspace/stock-analysis
 ```
 
 Kiểm tra workspace:
 ```bash
 ls {BASE_DIR}/scripts/aggregate_reports.py
 ```
-Nếu không tìm thấy → thông báo lỗi: "Workspace không tồn tại. Kiểm tra BASE_DIR." và dừng.
+Không tìm thấy → "Workspace không tồn tại. Kiểm tra BASE_DIR." và dừng.
+
+### Cache Check
+
+```bash
+ls {BASE_DIR}/output/stock_report_{TICKER}_{TODAY}.md 2>/dev/null && echo "REPORT_EXISTS"; \
+ls {BASE_DIR}/output/valuation_summary_{TICKER}_{TODAY}.json 2>/dev/null && echo "VAL_EXISTS"; \
+ls {BASE_DIR}/output/fundamental_summary_{TICKER}_{TODAY}.json 2>/dev/null && echo "FUND_EXISTS"
+```
+
+Quyết định:
+- `REPORT_EXISTS` → tất cả output đã có hôm nay → chuyển thẳng **Bước 4** (thông báo kết quả).
+- `VAL_EXISTS` (không có REPORT_EXISTS) → ghi nhận cả 2 summary paths, skip Bước 2+3, chuyển **Bước 4** sau khi xác nhận stock_report tồn tại.
+- `FUND_EXISTS` (không có VAL_EXISTS) → ghi nhận FUNDAMENTAL_SUMMARY_PATH, skip Bước 2, bắt đầu **Bước 3**.
+- Không có gì → chạy đầy đủ từ **Bước 2**.
 
 ---
 
 ## Bước 2: Launch Agent 1 — Fundamental Agent
 
-### Đọc định nghĩa agent:
-Dùng Read tool đọc:
-```
-{BASE_DIR}/.claude/agent/fundamental-agent.md
-```
+Đọc: `{BASE_DIR}/.claude/agents/fundamental-agent.md`
 
-### Spawn sub-agent:
-Dùng **Agent tool** (`subagent_type="claude"`) với prompt = nội dung của `fundamental-agent.md`,
-trong đó thay thế các placeholder:
-- `{TICKER}` → giá trị TICKER thực
-- `{TODAY}` → giá trị TODAY thực
-- `{BASE_DIR}` → đường dẫn đầy đủ
+Spawn **Agent tool** (`subagent_type="claude"`), thay thế `{TICKER}`, `{TODAY}`, `{BASE_DIR}`.
 
-**Chờ agent hoàn thành trước khi tiếp tục.**
-
-### Xác nhận output:
+Chờ hoàn thành. Xác nhận:
 ```bash
 ls {BASE_DIR}/output/fundamental_summary_{TICKER}_*.json
 ```
+Không tồn tại → "Agent 1 thất bại — fundamental_summary không được tạo." và dừng.
 
-Nếu file không tồn tại → thông báo: "Agent 1 thất bại — fundamental_summary không được tạo." và dừng.
-
-Ghi nhận: `FUNDAMENTAL_SUMMARY_PATH` = đường dẫn đầy đủ của file vừa tìm thấy.
-
----
-
-## Bước 3: Launch Agent 2 — Valuation Agent
-
-### Đọc định nghĩa agent:
-Dùng Read tool đọc:
-```
-{BASE_DIR}/.claude/agent/valuation-agent.md
-```
-
-### Spawn sub-agent:
-Dùng **Agent tool** (`subagent_type="claude"`) với prompt = nội dung của `valuation-agent.md`,
-trong đó thay thế các placeholder:
-- `{TICKER}` → giá trị TICKER thực
-- `{TODAY}` → giá trị TODAY thực
-- `{BASE_DIR}` → đường dẫn đầy đủ
-- `{FUNDAMENTAL_SUMMARY_PATH}` → đường dẫn từ Bước 2
-
-**Chờ agent hoàn thành trước khi tiếp tục.**
-
-### Xác nhận output:
-```bash
-ls {BASE_DIR}/output/valuation_summary_{TICKER}_*.json
-```
-
-Nếu file không tồn tại → thông báo: "Agent 2 thất bại — valuation_summary không được tạo." và dừng.
-
-Ghi nhận: `VALUATION_SUMMARY_PATH` = đường dẫn đầy đủ của file vừa tìm thấy.
+`FUNDAMENTAL_SUMMARY_PATH` = đường dẫn đầy đủ file vừa tìm thấy.
 
 ---
 
-## Bước 4: Launch Agent 3 — Report Agent
+## Bước 3: Launch Agent 2 — Valuation + Report Agent
 
-### Đọc định nghĩa agent:
-Dùng Read tool đọc:
-```
-{BASE_DIR}/.claude/agent/report-agent.md
-```
+Đọc: `{BASE_DIR}/.claude/agents/valuation-report-agent.md`
 
-### Spawn sub-agent:
-Dùng **Agent tool** (`subagent_type="claude"`) với prompt = nội dung của `report-agent.md`,
-trong đó thay thế các placeholder:
-- `{TICKER}` → giá trị TICKER thực
-- `{TODAY}` → giá trị TODAY thực
-- `{BASE_DIR}` → đường dẫn đầy đủ
-- `{FUNDAMENTAL_SUMMARY_PATH}` → đường dẫn từ Bước 2
-- `{VALUATION_SUMMARY_PATH}` → đường dẫn từ Bước 3
+Spawn **Agent tool** (`subagent_type="claude"`), thay thế:
+- `{TICKER}` → TICKER
+- `{TODAY}` → TODAY
+- `{BASE_DIR}` → BASE_DIR
+- `{FUNDAMENTAL_SUMMARY_PATH}` → từ Bước 2
 
-**Chờ agent hoàn thành trước khi tiếp tục.**
-
-### Xác nhận output:
+Chờ hoàn thành. Xác nhận:
 ```bash
 ls {BASE_DIR}/output/stock_report_{TICKER}_*.md
 ```
-
-Nếu file không tồn tại → thông báo: "Agent 3 thất bại — stock_report không được tạo."
+Không tồn tại → "Agent 2 thất bại — stock_report không được tạo."
 
 ---
 
-## Bước 5: Thông Báo Kết Quả
-
-Thông báo cho user:
+## Bước 4: Thông Báo Kết Quả
 
 ```
 ✅ /stock-analyze {TICKER} hoàn thành.
@@ -125,7 +89,7 @@ Thông báo cho user:
 📦 Files được tạo:
    Agent 1 → output/fundamental_summary_{TICKER}_{TODAY}.json
    Agent 2 → output/valuation_summary_{TICKER}_{TODAY}.json
-   Agent 3 → output/contradictions_{TICKER}_{TODAY}.json
+             output/contradictions_{TICKER}_{TODAY}.json
              output/stock_report_{TICKER}_{TODAY}.md
 
 Để đọc báo cáo:

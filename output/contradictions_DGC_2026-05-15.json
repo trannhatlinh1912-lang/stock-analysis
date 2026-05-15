@@ -1,0 +1,20 @@
+{
+  "ticker": "DGC",
+  "date": "2026-05-15",
+  "contradictions": [
+    {
+      "type": "growth_assumption_vs_actual",
+      "severity": "HIGH",
+      "description": "Valuation assumes positive FCF growth +14.9%/yr but revenue is declining (-7.9% CAGR)",
+      "val_assumption": "+14.9%",
+      "actual_metric": "-7.9% (revenue CAGR 2Y)",
+      "impact": "DCF base case likely overstated — verify growth catalyst"
+    }
+  ],
+  "checks_performed": {
+    "growth_vs_cagr": true,
+    "margin_vs_actual": false,
+    "wacc_vs_risk": true
+  },
+  "note": "1 contradiction(s) found"
+}

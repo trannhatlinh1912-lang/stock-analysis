@@ -66,21 +66,42 @@ def safe_int(val, default=None):
         return default
 
 
+def _get_item(df, item_id: str, col: str):
+    """Extract a value from vnstock v4 long-format finance DataFrame by item_id."""
+    rows = df[df["item_id"] == item_id]
+    if rows.empty:
+        return None
+    return safe_float(rows.iloc[0].get(col))
+
+
+def _quarter_cols(df, n=4):
+    """Return the n most recent quarter column names from a v4 finance DataFrame."""
+    cols = [c for c in df.columns if len(c) == 7 and c[4] == "-" and c[5] == "Q"]
+    return sorted(cols, reverse=True)[:n]
+
+
 def fetch_overview(ticker: str) -> dict:
     result = {"auditor": None, "listing_date": None, "exchange": None,
-              "charter_capital_b": None, "industry": TICKER_INDUSTRY_MAP.get(ticker)}
+              "issue_share_m": None, "state_pct": None, "foreign_pct": None,
+              "industry": TICKER_INDUSTRY_MAP.get(ticker)}
     try:
-        from vnstock3 import Vnstock
-        stock = Vnstock().stock(symbol=ticker, source="VCI")
-        overview = stock.company.overview()
-        if overview is not None and not overview.empty:
-            row = overview.iloc[0]
-            result["auditor"] = str(row.get("auditor", "") or "").strip() or None
-            result["listing_date"] = str(row.get("listing_date", "") or "").strip() or None
-            result["exchange"] = str(row.get("exchange", "") or "").strip() or None
-            charter = row.get("charter_capital") or row.get("charterCapital")
-            if charter:
-                result["charter_capital_b"] = round(safe_float(charter, 0) / 1e9, 1)
+        from vnstock import Company
+        comp = Company(symbol=ticker, source="VCI")
+        ov = comp.overview()
+        if ov is not None and not ov.empty:
+            row = ov.iloc[0]
+            listing_raw = str(row.get("listing_date") or "")
+            result["listing_date"] = listing_raw[:10] if listing_raw else None
+            result["exchange"] = str(row.get("com_group_code") or "").strip() or None
+            issue = safe_float(row.get("issue_share"))
+            if issue:
+                result["issue_share_m"] = round(issue / 1e6, 2)
+            state = safe_float(row.get("state_percentage"))
+            foreign = safe_float(row.get("foreigner_percentage"))
+            if state is not None:
+                result["state_pct"] = round(state * 100, 2)
+            if foreign is not None:
+                result["foreign_pct"] = round(foreign * 100, 4)
     except Exception as e:
         result["_error"] = str(e)
     return result
@@ -91,33 +112,33 @@ def fetch_shareholders(ticker: str) -> tuple[dict, list]:
                  "state_pct": None, "hhi_top5": None}
     shareholders = []
     try:
-        from vnstock3 import Vnstock
-        stock = Vnstock().stock(symbol=ticker, source="VCI")
-        df = stock.company.shareholders()
+        from vnstock import Company
+        comp = Company(symbol=ticker, source="VCI")
+        df = comp.shareholders()
         if df is not None and not df.empty:
             pcts = []
             for _, row in df.iterrows():
-                name = str(row.get("shareholder_name", row.get("name", "")) or "").strip()
-                pct_raw = row.get("owned_percent") or row.get("share_percent") or row.get("percent") or 0
+                name = str(row.get("share_holder") or "").strip()
+                pct_raw = row.get("share_own_percent") or 0
                 pct = safe_float(pct_raw, 0)
-                if pct and pct > 1:
-                    pct = pct / 100.0  # normalize if stored as percentage
-                pct_display = round(pct * 100, 2) if pct <= 1 else round(pct, 2)
+                # v4 stores as decimal (0.921) → convert to percentage display
+                pct_display = round(pct * 100, 4) if pct <= 1 else round(pct, 4)
                 shareholders.append({"name": name, "pct": pct_display})
                 pcts.append(pct_display)
 
             pcts_sorted = sorted(pcts, reverse=True)
             ownership["top1_pct"] = pcts_sorted[0] if pcts_sorted else None
-            ownership["top5_pct"] = round(sum(pcts_sorted[:5]), 2) if len(pcts_sorted) >= 1 else None
+            ownership["top5_pct"] = round(sum(pcts_sorted[:5]), 2) if pcts_sorted else None
             ownership["hhi_top5"] = round(sum(p**2 for p in pcts_sorted[:5]), 1) if pcts_sorted else None
 
-            # Detect state/foreign ownership
+            state_kw = ["dầu khí", "petrovietnam", "pvn", "scic", "nhà nước", "state", "evn", "vnpt", "mobifone", "vinacomin"]
+            foreign_kw = ["fund", "dragon", "ftse", "veil", "kim ", "kitmc", "vietnam growth", "ngoại"]
             for sh in shareholders:
-                name_lower = sh["name"].lower()
-                if any(k in name_lower for k in ["nhà nước", "state", "scic", "vietcombank", "nhnn"]):
-                    ownership["state_pct"] = (ownership["state_pct"] or 0) + sh["pct"]
-                if any(k in name_lower for k in ["foreign", "nước ngoài", "ftse", "veil", "dragon"]):
-                    ownership["foreign_pct"] = (ownership["foreign_pct"] or 0) + sh["pct"]
+                nl = sh["name"].lower()
+                if any(k in nl for k in state_kw):
+                    ownership["state_pct"] = round((ownership["state_pct"] or 0) + sh["pct"], 2)
+                if any(k in nl for k in foreign_kw):
+                    ownership["foreign_pct"] = round((ownership["foreign_pct"] or 0) + sh["pct"], 2)
     except Exception as e:
         ownership["_error"] = str(e)
 
@@ -127,33 +148,26 @@ def fetch_shareholders(ticker: str) -> tuple[dict, list]:
 def fetch_events(ticker: str) -> list:
     events = []
     try:
-        from vnstock3 import Vnstock
-        stock = Vnstock().stock(symbol=ticker, source="VCI")
-        df = stock.company.events()
+        from vnstock import Company
+        comp = Company(symbol=ticker, source="VCI")
+        df = comp.events()
         if df is not None and not df.empty:
             cutoff = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+            risk_keywords = [
+                "phát hành", "esop", "chuyển đổi", "trái phiếu", "niêm yết bổ sung",
+                "tăng vốn", "ngoại trừ", "going concern", "từ chối", "vi phạm",
+                "cảnh báo", "điều tra", "thay kiểm toán", "thay ban lãnh đạo",
+                "tạm dừng", "hủy niêm yết", "margin call", "cầm cố cổ phiếu",
+                "additional listing", "share issue", "bond",
+            ]
             for _, row in df.iterrows():
-                ev_date = str(row.get("event_date") or row.get("date") or "")
+                ev_date = str(row.get("display_date1") or row.get("public_date") or "")[:10]
                 if ev_date and ev_date < cutoff:
                     continue
-                ev_type = str(row.get("event_type") or row.get("type") or "").strip()
-                ev_detail = str(row.get("event_description") or row.get("description") or row.get("detail") or "").strip()
-
-                # Flag risky event types
-                risk_keywords = [
-                    "phát hành", "esop", "chuyển đổi", "trái phiếu", "niêm yết bổ sung",
-                    "tăng vốn", "ngoại trừ", "going concern", "từ chối", "vi phạm",
-                    "cảnh báo", "điều tra", "thay kiểm toán", "thay ban lãnh đạo",
-                    "tạm dừng", "hủy niêm yết", "margin call", "cầm cố cổ phiếu",
-                ]
+                ev_type = str(row.get("event_name_en") or row.get("event_name_vi") or "").strip()
+                ev_detail = str(row.get("event_title_en") or row.get("event_title_vi") or "").strip()
                 is_risky = any(k in (ev_type + ev_detail).lower() for k in risk_keywords)
-
-                events.append({
-                    "date": ev_date,
-                    "type": ev_type,
-                    "detail": ev_detail[:200],
-                    "is_risky": is_risky,
-                })
+                events.append({"date": ev_date, "type": ev_type, "detail": ev_detail[:200], "is_risky": is_risky})
             events.sort(key=lambda x: x.get("date", ""), reverse=True)
     except Exception as e:
         events.append({"_error": str(e)})
@@ -163,26 +177,24 @@ def fetch_events(ticker: str) -> list:
 def fetch_shares_trend(ticker: str) -> dict:
     result = {"current_m": None, "1y_ago_m": None, "dilution_pct": None}
     try:
-        from vnstock3 import Vnstock
-        stock = Vnstock().stock(symbol=ticker, source="VCI")
-        # Try to get shares outstanding from balance sheet
-        bs = stock.finance.balance_sheet(period="quarter", lang="en")
-        if bs is not None and not bs.empty:
-            # Look for shares outstanding column
-            shares_cols = [c for c in bs.columns if "share" in c.lower() and "outstanding" in c.lower()]
-            if not shares_cols:
-                shares_cols = [c for c in bs.columns if "charter_capital" in c.lower() or "equity" in c.lower()]
-
-            # Fallback: get from overview charter capital
-            from vnstock3 import Vnstock as V2
-            ov = V2().stock(symbol=ticker, source="VCI").company.overview()
-            if ov is not None and not ov.empty:
-                row = ov.iloc[0]
-                charter = safe_float(row.get("charter_capital") or row.get("charterCapital"), 0)
-                if charter:
-                    # Shares = charter_capital / 10000 (par value 10,000 VND)
-                    shares_m = round(charter / 10000 / 1e6, 2)
-                    result["current_m"] = shares_m
+        from vnstock import Company
+        comp = Company(symbol=ticker, source="VCI")
+        ov = comp.overview()
+        if ov is not None and not ov.empty:
+            issue = safe_float(ov.iloc[0].get("issue_share"))
+            if issue:
+                result["current_m"] = round(issue / 1e6, 2)
+        # Check capital_history for dilution
+        try:
+            hist = comp.capital_history()
+            if hist is not None and not hist.empty and len(hist) >= 2:
+                hist_sorted = hist.sort_values(by=hist.columns[0], ascending=False) if not hist.empty else hist
+                latest = safe_float(hist_sorted.iloc[0].get("issue_share") or hist_sorted.iloc[0].get("shares"))
+                prev = safe_float(hist_sorted.iloc[-1].get("issue_share") or hist_sorted.iloc[-1].get("shares"))
+                if latest and prev and prev > 0:
+                    result["dilution_pct"] = round((latest - prev) / prev * 100, 2)
+        except Exception:
+            pass
     except Exception as e:
         result["_error"] = str(e)
     return result
@@ -195,84 +207,45 @@ def fetch_debt_snapshot(ticker: str) -> dict:
         "net_debt_b": None,
     }
     try:
-        from vnstock3 import Vnstock
-        stock = Vnstock().stock(symbol=ticker, source="VCI")
+        from vnstock import Finance
+        fin = Finance(symbol=ticker, period="quarter", source="VCI")
 
-        # Balance sheet for debt & equity
-        bs = stock.finance.balance_sheet(period="quarter", lang="en")
+        bs = fin.balance_sheet(lang="en")
         if bs is not None and not bs.empty:
-            latest_bs = bs.iloc[0]
-            # Try common column names
-            debt_cols = [c for c in bs.columns if any(k in c.lower() for k in ["long_term_debt", "short_term_debt", "total_liab", "borrow"])]
-            equity_cols = [c for c in bs.columns if any(k in c.lower() for k in ["owner_equity", "equity", "stockholder"])]
-            cash_cols = [c for c in bs.columns if any(k in c.lower() for k in ["cash", "cash_equivalent"])]
+            qtrs = _quarter_cols(bs, 1)
+            if qtrs:
+                q = qtrs[0]
+                short_debt = _get_item(bs, "bsa56", q) or 0  # Short-term borrowings
+                long_debt  = _get_item(bs, "bsa71", q) or 0  # Long-term borrowings
+                equity     = _get_item(bs, "bsa78", q)        # Owner's Equity
+                cash       = _get_item(bs, "bsa2",  q)        # Cash and cash equivalents
 
-            total_debt = 0
-            for col in debt_cols[:3]:
-                v = safe_float(latest_bs.get(col), 0)
-                if v and v > 0:
-                    total_debt = max(total_debt, v)
+                total_debt = short_debt + long_debt
+                scale = 1e9  # VCI Finance returns values in VND raw → divide by 1e9 for billions
+                total_debt_b = round(total_debt / scale, 1) if total_debt else None
+                equity_b     = round(equity / scale, 1) if equity else None
+                cash_b       = round(cash / scale, 1) if cash else None
 
-            equity = 0
-            for col in equity_cols[:2]:
-                v = safe_float(latest_bs.get(col), 0)
-                if v and v > total_debt / 10:
-                    equity = max(equity, v)
+                result["total_debt_b"] = total_debt_b
+                result["equity_b"] = equity_b
+                if total_debt_b and equity_b and equity_b > 0:
+                    result["de_ratio"] = round(total_debt_b / equity_b, 2)
+                if total_debt_b is not None and cash_b is not None:
+                    result["net_debt_b"] = round(total_debt_b - cash_b, 1)
 
-            cash = 0
-            for col in cash_cols[:1]:
-                v = safe_float(latest_bs.get(col), 0)
-                if v and v > 0:
-                    cash = v
-
-            # Determine scale (VCI uses billion, raw vs 1e9)
-            scale = 1
-            if total_debt > 1e6:  # likely in millions or raw
-                scale = 1e9
-            elif total_debt > 1e3:
-                scale = 1e6
-
-            total_debt_b = round(total_debt / scale, 1) if total_debt else None
-            equity_b = round(equity / scale, 1) if equity else None
-            cash_b = round(cash / scale, 1) if cash else None
-
-            result["total_debt_b"] = total_debt_b
-            result["equity_b"] = equity_b
-            if total_debt_b and equity_b and equity_b > 0:
-                result["de_ratio"] = round(total_debt_b / equity_b, 2)
-            if total_debt_b and cash_b:
-                result["net_debt_b"] = round(total_debt_b - cash_b, 1)
-
-        # Income statement for interest expense & EBIT (TTM)
-        is_df = stock.finance.income_statement(period="quarter", lang="en")
+        is_df = fin.income_statement(lang="en")
         if is_df is not None and not is_df.empty:
-            recent_4q = is_df.head(4)
-            interest_cols = [c for c in is_df.columns if "interest" in c.lower() and "expense" in c.lower()]
-            ebit_cols = [c for c in is_df.columns if "operating_profit" in c.lower() or "ebit" in c.lower()]
-            revenue_cols = [c for c in is_df.columns if "revenue" in c.lower() or "net_sales" in c.lower()]
-
+            qtrs4 = _quarter_cols(is_df, 4)
             interest_ttm = 0
-            for col in interest_cols[:1]:
-                vals = [safe_float(v, 0) for v in recent_4q[col].tolist()]
-                interest_ttm = sum(abs(v) for v in vals if v)
-
             ebit_ttm = 0
-            for col in ebit_cols[:1]:
-                vals = [safe_float(v, 0) for v in recent_4q[col].tolist()]
-                ebit_ttm = sum(v for v in vals if v)
-
-            # Determine scale from revenue
-            rev_ttm = 0
-            for col in revenue_cols[:1]:
-                vals = [safe_float(v, 0) for v in recent_4q[col].tolist()]
-                rev_ttm = sum(v for v in vals if v)
-
-            is_scale = 1
-            if rev_ttm > 1e12:
-                is_scale = 1e9
-            elif rev_ttm > 1e9:
-                is_scale = 1e6
-
+            for q in qtrs4:
+                ie = _get_item(is_df, "isa8", q)   # Interest expenses (negative)
+                op = _get_item(is_df, "isa11", q)  # Operating profit/EBIT
+                if ie is not None:
+                    interest_ttm += abs(ie)
+                if op is not None:
+                    ebit_ttm += op
+            is_scale = 1e9
             result["interest_expense_b"] = round(interest_ttm / is_scale, 1) if interest_ttm else None
             result["ebit_b"] = round(ebit_ttm / is_scale, 1) if ebit_ttm else None
             if result["ebit_b"] and result["interest_expense_b"] and result["interest_expense_b"] > 0:

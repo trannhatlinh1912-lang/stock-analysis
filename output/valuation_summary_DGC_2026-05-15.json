@@ -1,0 +1,85 @@
+{
+  "ticker": "DGC",
+  "date": "2026-05-15",
+  "stage": "valuation",
+  "found": [
+    "macro",
+    "industry",
+    "business",
+    "financials",
+    "valuation",
+    "technical",
+    "risk"
+  ],
+  "missing": [],
+  "analyses": {
+    "macro": {
+      "verdict": "BEARISH",
+      "key_points": [
+        "Fed Rate: 3.64%",
+        "DXY trend: Bearish",
+        "GDP VN: 7.1% | VN-Index: 1,925"
+      ],
+      "data_source": "macro_report",
+      "report_file": "output/macro_report_2026-05-15.md"
+    },
+    "industry": {
+      "verdict": "Phục hồi",
+      "key_points": [
+        "Chu kỳ: ĐÁY",
+        "Revenue growth: -24.4% | Gross margin: +23.0%",
+        "Relative vs VN-Index 1Y: -102.0%"
+      ],
+      "data_source": "industry_report",
+      "report_file": "output/industry_report_DGC_2026-05-15.md"
+    },
+    "business": {
+      "verdict": "Thấp",
+      "key_points": [
+        "Điểm chất lượng: 2.5/10 — Thấp",
+        "ROE: [missing_data] | D/E: [missing_data]",
+        "P/E: [missing_data]"
+      ],
+      "data_source": "business_report",
+      "report_file": "output/business_report_DGC_2026-05-15.md"
+    },
+    "financials": {
+      "verdict": "[missing_data]",
+      "key_points": [
+        "Điểm tài chính: [missing_data] | ROE: [missing_data]",
+        "D/E: [missing_data] | OCF/NI: [missing_data]",
+        "Red flags: [missing_data]"
+      ],
+      "data_source": "financial_report",
+      "report_file": "output/financial_report_DGC_2026-05-15.md"
+    },
+    "risk": {
+      "verdict": "[missing_data]",
+      "key_points": [
+        "[missing_data]"
+      ],
+      "thesis_breakers": "[missing_data]",
+      "data_source": "risk_report",
+      "report_file": "output/risk_report_DGC_2026-05-15.md"
+    },
+    "technical": {
+      "verdict": "[missing_data]",
+      "key_points": [
+        "Trend: [FACT] | RSI: [missing_data]",
+        "Hỗ trợ: 1 | Kháng cự: 1"
+      ],
+      "data_source": "technical_report",
+      "report_file": "output/technical_report_DGC_2026-05-15.md"
+    },
+    "valuation": {
+      "verdict": "[missing_data]",
+      "key_points": [
+        "Giá hiện tại: 51 | Fair value: [missing_data]",
+        "P/E: 6.96× | Upside: +14.9%",
+        "Base case: [missing_data]"
+      ],
+      "data_source": "valuation_report",
+      "report_file": "output/valuation_report_DGC_2026-05-15.md"
+    }
+  }
+}

@@ -3,9 +3,15 @@
 ## Toàn cầu
 | Chỉ số | Giá trị | Tín hiệu |
 |---|---|---|
-| Gold | $4,680 | 🟡 Neutral |
-| VIX | 17.5 | 🟡 Neutral |
-| S&P 500 | 7,499 | 🟡 Neutral |
+| Fed Rate | 3.64% | 🟡 Neutral |
+| US CPI | 3.95% YoY | 🟡 Neutral |
+| US Unemployment | 4.3% | 🟡 Neutral |
+| Yield Curve 10Y-2Y | 0.48% | 🟡 Neutral |
+| DXY | 118 | 🔴 Bearish |
+| Oil WTI | $102 | 🔴 Bearish |
+| Gold | $4,675 | 🟡 Neutral |
+| VIX | 17.2 | 🟡 Neutral |
+| S&P 500 | 7,506 | 🟡 Neutral |
 
 ## Việt Nam
 | Chỉ số | Giá trị | Tín hiệu |
@@ -16,7 +22,7 @@
 | VN-Index | 1,925 | 🟡 Neutral |
 | USD/VND | 26,340 | 🔴 Bearish |
 
-## Verdict: 🟡 NEUTRAL
-> Bearish signals: 1 | Bullish signals: 1
+## Verdict: 🔴 BEARISH
+> Bearish signals: 3 | Bullish signals: 1
 
 _[Claude sẽ bổ sung nhận định kênh truyền dẫn và ngành ảnh hưởng ở đây]_

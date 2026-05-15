@@ -115,14 +115,50 @@ def fetch_price_history(ticker: str) -> "pd.DataFrame":
     raise RuntimeError(f"Cannot fetch price history for {ticker}: {errors}")
 
 
-def compute_indicators(df: "pd.DataFrame") -> dict:
-    """Compute TA indicators using pandas_ta. Returns dict of scalar values."""
-    import pandas as pd
-    try:
-        import pandas_ta as ta
-    except ImportError:
-        raise RuntimeError("pandas_ta not installed. Run: pip install pandas_ta")
+def _ta_rsi(close, length=14):
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(length).mean()
+    loss = -delta.clip(upper=0).rolling(length).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
+
+def _ta_macd(close, fast=12, slow=26, signal=9):
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line, macd_line - signal_line, signal_line
+
+
+def _ta_stoch(high, low, close, k=14, d=3):
+    lowest = low.rolling(k).min()
+    highest = high.rolling(k).max()
+    stoch_k = 100 * (close - lowest) / (highest - lowest)
+    return stoch_k, stoch_k.rolling(d).mean()
+
+
+def _ta_bbands(close, length=20, std=2):
+    sma = close.rolling(length).mean()
+    sd = close.rolling(length).std()
+    upper, lower = sma + std * sd, sma - std * sd
+    pct = (close - lower) / (upper - lower)
+    return upper, lower, pct
+
+
+def _ta_atr(high, low, close, length=14):
+    import pandas as pd
+    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+    return tr.rolling(length).mean()
+
+
+def _ta_obv(close, vol):
+    direction = close.diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+    return (vol * direction).cumsum()
+
+
+def compute_indicators(df: "pd.DataFrame") -> dict:
+    """Compute TA indicators using pure pandas. No external TA library required."""
     close = df["close"].astype(float)
     high  = df["high"].astype(float)
     low   = df["low"].astype(float)
@@ -137,52 +173,35 @@ def compute_indicators(df: "pd.DataFrame") -> dict:
     ema20 = _safe(close.ewm(span=20, adjust=False).mean().iloc[-1]) if n >= 20 else None
 
     # RSI(14)
-    rsi_series = ta.rsi(close, length=14)
-    rsi14 = _safe(rsi_series.iloc[-1]) if rsi_series is not None and len(rsi_series) > 0 else None
+    rsi14 = _safe(_ta_rsi(close, 14).iloc[-1]) if n >= 15 else None
 
     # MACD(12,26,9)
-    macd_df = ta.macd(close, fast=12, slow=26, signal=9)
     macd_val = macd_hist = macd_sig = None
-    if macd_df is not None and len(macd_df) > 0:
-        cols = list(macd_df.columns)
-        # pandas_ta columns: MACD_12_26_9, MACDh_12_26_9, MACDs_12_26_9
-        macd_col  = next((c for c in cols if c.startswith("MACD_")), None)
-        hist_col  = next((c for c in cols if c.startswith("MACDh_")), None)
-        sig_col   = next((c for c in cols if c.startswith("MACDs_")), None)
-        macd_val  = _safe(macd_df[macd_col].iloc[-1])  if macd_col  else None
-        macd_hist = _safe(macd_df[hist_col].iloc[-1])  if hist_col  else None
-        macd_sig  = _safe(macd_df[sig_col].iloc[-1])   if sig_col   else None
+    if n >= 27:
+        _m, _h, _s = _ta_macd(close)
+        macd_val, macd_hist, macd_sig = _safe(_m.iloc[-1]), _safe(_h.iloc[-1]), _safe(_s.iloc[-1])
 
     # Stochastic(14,3)
-    stoch_df = ta.stoch(high, low, close, k=14, d=3)
     stoch_k = stoch_d = None
-    if stoch_df is not None and len(stoch_df) > 0:
-        k_col = next((c for c in stoch_df.columns if c.startswith("STOCHk_")), None)
-        d_col = next((c for c in stoch_df.columns if c.startswith("STOCHd_")), None)
-        stoch_k = _safe(stoch_df[k_col].iloc[-1]) if k_col else None
-        stoch_d = _safe(stoch_df[d_col].iloc[-1]) if d_col else None
+    if n >= 17:
+        _k, _d = _ta_stoch(high, low, close)
+        stoch_k, stoch_d = _safe(_k.iloc[-1]), _safe(_d.iloc[-1])
 
     # Bollinger Bands(20,2)
-    bb_df = ta.bbands(close, length=20, std=2)
     bb_upper = bb_lower = bb_pct = None
-    if bb_df is not None and len(bb_df) > 0:
-        u_col = next((c for c in bb_df.columns if "BBU_" in c), None)
-        l_col = next((c for c in bb_df.columns if "BBL_" in c), None)
-        p_col = next((c for c in bb_df.columns if "BBP_" in c), None)
-        bb_upper = _safe(bb_df[u_col].iloc[-1]) if u_col else None
-        bb_lower = _safe(bb_df[l_col].iloc[-1]) if l_col else None
-        bb_pct   = _safe(bb_df[p_col].iloc[-1]) if p_col else None
+    if n >= 20:
+        _bu, _bl, _bp = _ta_bbands(close)
+        bb_upper, bb_lower, bb_pct = _safe(_bu.iloc[-1]), _safe(_bl.iloc[-1]), _safe(_bp.iloc[-1])
 
     # ATR(14)
-    atr_series = ta.atr(high, low, close, length=14)
-    atr14 = _safe(atr_series.iloc[-1]) if atr_series is not None and len(atr_series) > 0 else None
+    atr14 = _safe(_ta_atr(high, low, close).iloc[-1]) if n >= 15 else None
 
-    # OBV trend (simple: compare last OBV vs 20-session ago OBV)
-    obv_series = ta.obv(close, vol)
+    # OBV trend
     obv_trend = "flat"
-    if obv_series is not None and len(obv_series) > 25:
-        obv_now   = float(obv_series.iloc[-1])
-        obv_prev  = float(obv_series.iloc[-21])
+    if n > 25:
+        obv_series = _ta_obv(close, vol)
+        obv_now  = float(obv_series.iloc[-1])
+        obv_prev = float(obv_series.iloc[-21])
         obv_trend = "rising" if obv_now > obv_prev * 1.02 else ("falling" if obv_now < obv_prev * 0.98 else "flat")
 
     # Volume stats

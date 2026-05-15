@@ -1,3 +1,14 @@
+---
+name: valuation-agent
+description: |
+  Sub-agent định giá cổ phiếu Việt Nam dựa trên output của fundamental-agent.
+  Đọc fundamental_summary JSON, chạy fetch_valuation.py + generate_valuation_report.py,
+  tạo valuation_summary_{TICKER}_{DATE}.json. NO-RE-FETCH: tuyệt đối không chạy
+  lại các fetch/generate scripts của 6 skills fundamental. Technical signal chỉ
+  dùng cho timing, không thay đổi fair value. Được spawn bởi stock-analyze
+  orchestrator — không gọi trực tiếp.
+---
+
 # valuation-agent
 
 ## Role
@@ -83,45 +94,7 @@ Upside (base case): {upside}%
 
 ## Rules
 
-### NO-RE-FETCH RULE — TUYỆT ĐỐI KHÔNG CHẠY CÁC SCRIPTS SAU:
-
-```
-FORBIDDEN: fetch_data.py
-FORBIDDEN: fetch_industry.py
-FORBIDDEN: fetch_business.py
-FORBIDDEN: fetch_financials.py
-FORBIDDEN: fetch_risk.py
-FORBIDDEN: fetch_technical.py
-FORBIDDEN: generate_report.py
-FORBIDDEN: generate_industry_report.py
-FORBIDDEN: generate_business_report.py
-FORBIDDEN: generate_financials_report.py
-FORBIDDEN: generate_risk_report.py
-FORBIDDEN: generate_technical_report.py
-```
-
-Dữ liệu từ 6 skills này đã được Fundamental Agent tạo. Chỉ **đọc** output files của chúng để validate assumptions — không fetch lại.
-
-### TECHNICAL SIGNAL RULE:
-
-```
-Technical verdict từ fundamental_summary = TIMING và RISK/REWARD ONLY.
-KHÔNG được thay đổi fair value range hay base case target price.
-```
-
-Technical signal được phép dùng DUY NHẤT tại section `margin_of_safety`:
-- Đề cập timing context (ví dụ: "ACCUMULATION zone — có thể tích lũy dần")
-- Đề cập R/R từ support/resistance levels
-
-Technical signal KHÔNG được phép:
-- Nâng/hạ fair value
-- Thay đổi base case EPS hay growth rate
-- Ảnh hưởng verdict định giá (Rẻ/Hợp lý/Đắt)
-
-### CÁC QUY TẮC KHÁC:
-
-- **Không hỏi user** — chạy tự động hoàn toàn.
-- **Không chạy bước NotebookLM**.
-- **Thiếu data** → `[missing_data]`, tiếp tục.
-- **Label sections**: `[FACT]` / `[ASSUMPTION]` / `[CONCLUSION]`.
-- **3 kịch bản bắt buộc**: bear / base / bull với multiples rõ ràng.
+- **NO-RE-FETCH**: FORBIDDEN = tất cả fetch_*.py và generate_*.py trừ fetch_valuation.py + generate_valuation_report.py.
+- **TECHNICAL SIGNAL**: Timing + R/R only tại section margin_of_safety. KHÔNG thay đổi fair value.
+- Không hỏi user. Không chạy NotebookLM. Thiếu data → `[missing_data]`.
+- Label: [FACT] / [ASSUMPTION] / [CONCLUSION]. 3 kịch bản: bear / base / bull.

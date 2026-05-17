@@ -1,145 +1,94 @@
 ---
 name: stock-technical
-description: |
-  Phân tích kỹ thuật và dòng tiền cho cổ phiếu Việt Nam để hỗ trợ timing mua/bán.
-  KHÔNG thay thế phân tích cơ bản — dùng SAU /stock-valuation để xác nhận điểm vào/ra.
-  Trigger khi user gõ /stock-technical, hỏi về "phân tích kỹ thuật", "chart", "RSI",
-  "MACD", "MA", "hỗ trợ kháng cự", "dòng tiền", "khối ngoại", "timing", "điểm vào",
-  "điểm ra", "tín hiệu mua/bán", "technical analysis", "money flow", "foreign flow",
-  "volume analysis", "momentum", "trend", "breakout", "bollinger", "signal kỹ thuật",
-  "tín hiệu kỹ thuật", "vùng tích lũy", "vùng phân phối".
-  Skill nhận ticker (HPG, VCB...) hoặc tên công ty. Lấy OHLCV + foreign flow từ vnstock,
-  tính TA indicators qua pandas_ta, delegate Codex để tiết kiệm token.
-  Output 7 sections: price_trend, trend_indicators, momentum_signals, volume_analysis,
-  money_flow, key_levels, timing_signal. Mỗi section label rõ [FACT] / [ASSUMPTION] /
-  [CONCLUSION]. Không bịa số liệu. Không khuyến nghị mua/bán — chỉ báo Timing Zone
-  (ACCUMULATION / WATCH / DISTRIBUTION). Dùng sau /stock-valuation.
+description: Technical analysis skill for Vietnamese stocks (e.g. GAS, BSR, MBB, REE, HPG). Use for timing zones, risk management, support/resistance, money flow. Always run the data-quality audit before drawing conclusions. Do not fabricate numbers — missing data must be labelled missing_data.
 ---
 
-# stock-technical
+# Stock Technical
 
-## Bước 1: Parse Input
+## 1. Purpose
 
-Xác định ticker từ input:
-- **Ticker trực tiếp** (HPG, VCB, FPT...) → dùng luôn
-- **Tên công ty/ngành** → map sang ticker đại diện (hỏi user nếu không chắc):
+Technical timing for Vietnamese equities. Supports buy/sell timing — does **not** replace fundamental analysis or valuation. User-facing summaries in Vietnamese; pipeline logs/code in English.
 
-| Tên | Ticker |
-|-----|--------|
-| thép / steel | HPG |
-| ngân hàng / bank | VCB |
-| bất động sản / BĐS | VHM |
-| chứng khoán | SSI |
-| bán lẻ | MWG |
-| năng lượng / dầu khí | GAS |
-| dược | DHG |
-| công nghệ | FPT |
-| phân bón | DPM |
-| xây dựng | CTD |
+## 2. Mandatory workflow
 
-Nếu không khớp: hỏi user cung cấp ticker cụ thể.
+Run the three modules in `scripts/` in order. Each step writes artifacts the next step consumes.
 
-## Bước 2: Fetch Data (dùng Codex)
+1. **Fetch OHLCV + corporate actions + audit adjusted price**
+   ```bash
+   python scripts/fetch_price_audit.py --symbol {SYMBOL} --start YYYY-MM-DD --end YYYY-MM-DD
+   ```
+   Artifacts: `data/{SYMBOL}_price_VCI.csv`, `data/{SYMBOL}_corporate_actions.csv`, `reports/{SYMBOL}_data_quality_report.md` (includes `adjusted_price_status` + `long_ma_confidence`).
 
-```
-Dùng /codex:rescue với prompt:
-"Run: python ~/.claude/workspace/stock-analysis/scripts/fetch_technical.py --ticker {TICKER}
- Report only: (1) cache hit or fresh fetch, (2) path of output JSON file.
- Do NOT print the JSON content."
-```
+2. **Calculate indicators**
+   ```bash
+   python scripts/indicator_engine.py --csv data/{SYMBOL}_price_VCI.csv --symbol {SYMBOL}
+   ```
+   Artifacts: `data/{SYMBOL}_indicators.csv`, `reports/{SYMBOL}_indicator_report.md`.
 
-Fallback nếu không có Codex:
-```bash
-cd ~/.claude/workspace/stock-analysis && python scripts/fetch_technical.py --ticker {TICKER}
-```
+3. **Decision snapshot**
+   ```bash
+   python scripts/decision_framework.py --csv data/{SYMBOL}_indicators.csv --symbol {SYMBOL}
+   ```
+   Artifacts: `data/{SYMBOL}_decision_snapshot.json`, `reports/{SYMBOL}_technical_decision.md`.
 
-Ghi nhận đường dẫn: `data/technical_snapshot_{TICKER}_{DATE}.json`
+Do not skip step 1. The decision is invalid until adjusted-price status is known.
 
-## Bước 3: Generate Report (dùng Codex)
+## 3. Data rules
 
-```
-Dùng /codex:rescue với prompt:
-"Run: python ~/.claude/workspace/stock-analysis/scripts/generate_technical_report.py --snapshot {SNAPSHOT_PATH}
- Print only the lines starting from '---SNAPSHOT_JSON---' to end of output."
-```
+- If `adjusted_price_status != "confirmed"`, treat SMA100/SMA200 as **medium_low confidence** at best; do not promote them to high-confidence trend signals.
+- Missing data → write `missing_data`. Never infer or fabricate.
+- Price-unit scale check: VCI returns close in **thousand VND**; corporate action `value_per_share` is in **VND**. Normalise before computing expected ex-rights drop. `fetch_price_audit.py` auto-detects when `median_close ∈ (1, 1000)` and applies `scale = 1000 VND/unit`.
+- Never load raw OHLCV / long indicator series into the user-facing message.
 
-Fallback:
-```bash
-cd ~/.claude/workspace/stock-analysis && python scripts/generate_technical_report.py --snapshot {SNAPSHOT_PATH}
-```
+## 4. Indicators (computed by `indicator_engine.py`)
 
-Lấy compact JSON từ output (phần sau `---SNAPSHOT_JSON---`).
+- Trend: SMA20/50/100/200, EMA20/50, MA alignment flag, golden/death cross, distance-from-MA %.
+- Momentum: RSI14, MACD (12,26,9) line/signal/histogram, Stochastic %K(14)/%D(3).
+- Volatility: ATR14 (Wilder), Bollinger Bands (20, 2σ), `bb_position`, ATR/Close %.
+- Volume: vol_ma20, vol_ratio, up/down-volume 20D, vol_spike flag (≥2× MA20).
+- Money flow: OBV, OBV slope 20D, MFI14, CMF20.
+- Price action: returns 1/5/20/60/120D, 52W high/low, distance-from-52W %.
+- Support/Resistance: swing high/low 20/50/100, classic pivot + R1/S1, ATR stops (1.5×, 2×).
 
-## Bước 4: Viết 7 Sections Phân tích
+## 5. Decision states (produced by `decision_framework.py`)
 
-Đọc compact JSON (~3 KB). Viết đúng 7 sections — **tổng < 450 từ**.
-BẮT BUỘC label: `[FACT]` (từ data API), `[ASSUMPTION]` (suy luận), `[CONCLUSION]` (nhận định).
-Thiếu data → ghi `[missing_data]`, không bịa số.
+Priority order (first match wins):
 
-```
-## price_trend [FACT]
-{TICKER} — {DATE} | Giá: {price} VND | 1D: {+/-x}% | 1M: {+/-x}% | 3M: {+/-x}%
-52W High: {x} | 52W Low: {x} | vs 52W High: {-x}%
-[FACT] Xu hướng 3 tháng: [tăng/giảm/đi ngang] — 1 câu mô tả ngắn gọn.
+1. `DISTRIBUTION` — close < SMA20, MACD hist < 0, CMF20 < 0, OBV slope < 0.
+2. `BREAKOUT_WITH_EXHAUSTION_RISK` — breakout-confirmed AND BB above_upper AND Stoch %K ≥ 90 AND vol_ratio ≥ 2.
+3. `BULLISH_TREND_CONFIRMED` — close > SMA20 > SMA50 > SMA100 > SMA200, MACD hist > 0, vol_ratio ≥ 1.
+4. `BREAKOUT_CONFIRMED` — close > SMA20/50/200, vol_ratio ≥ 1.5, ret_1d > 2%, MACD hist > 0.
+5. `ACCUMULATION` — close within 1 ATR of SMA20 or SMA50, vol_ratio 0.8–1.5, momentum non-negative, BB ≠ above_upper.
+6. `WATCH` — fallback when signals mixed or insufficient.
 
-## trend_indicators [FACT + CONCLUSION]
-MA20: {x} | MA50: {x} | MA200: {x} | EMA20: {x}
-Giá vs MA20: {+/-x}% | Giá vs MA200: {+/-x}%
-MA20 vs MA50: [Golden Cross / Death Cross / Neutral]
-[CONCLUSION]: Xu hướng = [TĂNG / GIẢM / TRUNG TÍNH] — 1 câu lý do cụ thể.
+## 6. Risk rules
 
-## momentum_signals [FACT + CONCLUSION]
-RSI(14): {x} [{Oversold <30 / Neutral / Overbought >70}]
-MACD(12,26,9): {x} | Signal: {x} | Histogram: {+/-x} [{Bullish/Bearish/Neutral}]
-Stoch(14,3): K={x} D={x} [{Oversold/Neutral/Overbought}]
-[CONCLUSION]: Momentum = [MẠNH / TRUNG TÍNH / YẾU] — 1 câu.
+- `breakout_exhaustion_risk` — BB == above_upper AND vol_ratio ≥ 2 AND Stoch %K ≥ 90 AND ret_1d ≥ 5%.
+- `near_sma100_resistance` — close < SMA100 AND dist_sma100_pct ∈ [-2%, 0%].
+- `trend_not_fully_aligned` — NOT (close > SMA20 > SMA50 > SMA100 > SMA200).
+- Other automated risks: RSI extremes, CMF distribution divergence, MACD momentum fade, 52W proximity.
 
-## volume_analysis [FACT + CONCLUSION]
-Volume hôm nay: {x}M cp | MA20 Vol: {x}M cp | Tỷ lệ: {x}×
-OBV trend: [rising/falling/flat]
-[CONCLUSION]: Volume = [XÁC NHẬN xu hướng / MÂU THUẪN / TRUNG TÍNH] — 1 câu.
+## 7. Decision output schema
 
-## money_flow [FACT + CONCLUSION]
-Khối ngoại 10D: Net {+/-x} B VND (Mua {x} B / Bán {x} B)
-Sở hữu NN: {x}% | Room còn: {x}%
-[CONCLUSION]: Khối ngoại = [MUA RÒNG / BÁN RÒNG / TRUNG TÍNH] — tác động ngắn hạn.
+`data/{SYMBOL}_decision_snapshot.json` must contain:
 
-## key_levels [FACT]
-Kháng cự 1: {x} | Kháng cự 2: {x}
-Hỗ trợ 1: {x}  | Hỗ trợ 2:  {x}
-Pivot: {x} | BB Upper: {x} | BB Lower: {x} | ATR(14): {x}
-R/R từ giá hiện tại: +{x}% → R1 / -{x}% → S1
+`technical_state`, `raw_score`, `adjusted_score`, `confidence_score` (final),
+`score_breakdown` (incl. `triple_risk_penalty_applied`, `exhaustion_cap_applied`),
+`trend_status`, `momentum_status`, `volume_status`, `money_flow_status`, `volatility_status`,
+`entry_strategy`, `entry_zones` (`retest_aggressive`, `retest_standard`, `breakout_confirmation_zone`),
+`stop_loss` (`primary_stop`, `hard_stop`, `structural_stop`),
+`resistance_levels` (incl. `confluence_resistance` merges),
+`support_levels`, `upgrade_conditions`, `downgrade_conditions`,
+`key_risks`, `final_view` (Vietnamese).
 
-## timing_signal [CONCLUSION]
-⏱ Timing Zone: [🟢 ACCUMULATION / 🟡 WATCH / 🔴 DISTRIBUTION]
-| Signal     | Verdict   |
-|------------|-----------|
-| Trend      | {BULLISH/NEUTRAL/BEARISH} |
-| Momentum   | {BULLISH/NEUTRAL/BEARISH} |
-| Volume     | {CONFIRM/NEUTRAL/DIVERGE} |
-| Money Flow | {INFLOW/NEUTRAL/OUTFLOW}  |
-[CONCLUSION] 2 câu: vị trí giá hiện tại so với S/R + điều kiện cần để signal đổi chiều.
-```
+## 8. Hard rules
 
-Nguyên tắc token: không diễn giải lại từng số thô — chỉ nhận định xu hướng và ý nghĩa.
+- `BREAKOUT_WITH_EXHAUSTION_RISK` → entry strategy: **không mua đuổi tỷ trọng lớn**; chờ retest hoặc xác nhận với volume duy trì.
+- `BREAKOUT_WITH_EXHAUSTION_RISK` → `confidence_score` is **capped at 68** regardless of raw rubric.
+- Triple-risk combo (`breakout_exhaustion_risk` + `near_sma100_resistance` + `trend_not_fully_aligned`) → extra **−5** to `adjusted_score` before the cap.
+- **Never** output "STRONG BUY" or equivalent from technical analysis alone.
+- Resistance levels within **0.3%** of each other must be **merged into a `confluence_resistance` zone**, preserving every contributing source. Do not drop a source.
 
-## Bước 5: Lazy-load Thresholds (khi cần verify)
+## References
 
-Chỉ đọc khi cần xác nhận ngưỡng cụ thể (RSI vùng 45-65, MACD gần zero, v.v.):
-```
-~/.claude/workspace/stock-analysis/references/technical_analysis.md
-```
-
-## Bước 6: Xác nhận & Lưu NotebookLM (tùy chọn)
-
-Thông báo: `output/technical_report_{TICKER}_{TODAY}.md`
-
-Hỏi user: "Lưu báo cáo vào NotebookLM không?"
-
-Nếu đồng ý:
-```
-Dùng /notebooklm:
-"Add file ~/.claude/workspace/stock-analysis/output/technical_report_{TICKER}_{TODAY}.md
- as a source to notebook named 'Stock Technical Analysis History'.
- Create the notebook if it doesn't exist."
-```
+See `README.md` for an end-to-end example on GAS.

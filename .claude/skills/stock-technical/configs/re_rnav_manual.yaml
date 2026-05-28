@@ -1,0 +1,42 @@
+# Real Estate RNAV per share — manual from CTCK reports.
+# Stale > 90 days → RE valuation primary unavailable, fallback to other methods.
+#
+# Source: VCBS / SSI / BSC RE coverage. RNAV computed using:
+#   land bank × ASP × valuation adjustments − debt − minority interest.
+#
+# Per-ticker schema:
+#   rnav_per_share_vnd: estimated RNAV
+#   methodology: brief description
+#   source: citation + date
+
+last_updated: 2026-05-29
+
+tickers:
+  VHM:
+    rnav_per_share_vnd: 95_000
+    methodology: "Land bank 19000ha × ASP weighted avg − net debt"
+    source: "TODO: VCBS RE Note Q1-2026"
+  VIC:
+    rnav_per_share_vnd: 65_000
+    methodology: "SOTP: VHM stake + VinFast + retail"
+    source: "TODO"
+  KDH:
+    rnav_per_share_vnd: 42_000
+    methodology: "HCM project pipeline DCF"
+    source: "TODO"
+  NLG:
+    rnav_per_share_vnd: 38_000
+    methodology: "Mizuki/Akari/Izumi project + land bank"
+    source: "TODO"
+  DXG:
+    rnav_per_share_vnd: 18_000
+    methodology: "Gem Sky World + land bank"
+    source: "TODO"
+  NVL:
+    rnav_per_share_vnd: 25_000
+    methodology: "Aqua/Novaworld minus distressed debt"
+    source: "TODO — RNAV heavily contested by analysts due to debt restructure"
+
+notes: |
+  Placeholder demo values. CRITICAL: replace với actual CTCK RNAV before use.
+  P/RNAV threshold pass = actual_price / rnav < 0.5 (per L6 spec).

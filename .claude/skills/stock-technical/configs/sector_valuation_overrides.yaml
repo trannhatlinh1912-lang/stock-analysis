@@ -1,0 +1,25 @@
+# Sector valuation overrides — manual sector P/E/B means from CTCK.
+# Used when basket-derived means are unreliable (small sample or outliers).
+# Stale > 90 days → use basket with sample_size_warning.
+#
+# Source: SSI / VCBS sector P/E P/B tables.
+
+last_updated: 2026-05-29
+
+sectors:
+  securities:
+    pb_5y_mean: 1.4
+    pb_5y_std: 0.3
+    pe_5y_mean: 12.0
+    pe_5y_std: 3.0
+    source: "TODO — small basket n=3 (VND SSI HCM); override với industry-wide stats"
+  oil_gas:
+    pe_normalised_5y_mean: 11.0
+    source: "TODO — override default threshold 10 if needed"
+  consumer:
+    pe_5y_mean: 18.5
+    pe_5y_std: 4.0
+    source: "TODO"
+
+notes: |
+  Defaults from L6 spec. Override here only if basket-derived value not representative.

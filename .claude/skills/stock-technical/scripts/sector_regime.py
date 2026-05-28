@@ -193,6 +193,41 @@ MODIFIER = {
 }
 
 
+def _cycle_dimension(sector_name: str) -> dict:
+    """Read latest sector_cycle/{sector}_{DATE}.json if present."""
+    today = date.today().isoformat()
+    # Real Estate uses 'real_estate' file name; Securities + Banking + others same
+    p = DATA / "sector_cycle" / f"{sector_name}_{today}.json"
+    if not p.exists():
+        # Fallback: most recent file for this sector
+        candidates = sorted((DATA / "sector_cycle").glob(f"{sector_name}_*.json"),
+                            reverse=True) if (DATA / "sector_cycle").exists() else []
+        if not candidates:
+            return {"label": "missing", "note": "no_cycle_proxy_output"}
+        p = candidates[0]
+    try:
+        d = json.loads(p.read_text())
+    except Exception:
+        return {"label": "missing", "note": "parse_error"}
+    agg = d.get("aggregate", {})
+    sector_trend = agg.get("sector_trend", "missing")
+    # Map sector_trend label → universal cycle label
+    label_map = {
+        "expanding": "expanding", "improving": "expanding", "accelerating": "expanding",
+        "compressing": "compressing", "declining": "compressing",
+        "stable": "stable",
+        "missing": "missing", "insufficient_data": "missing",
+    }
+    label = label_map.get(sector_trend, "missing")
+    return {
+        "label": label,
+        "sector_trend_raw": sector_trend,
+        "metric": d.get("metric"),
+        "source_file": str(p.name),
+        "n_valid": agg.get("n_valid"),
+    }
+
+
 def compute_sector(sector_name: str, basket: list[str], start: str, end: str, vni_df: pd.DataFrame) -> dict:
     basket_df, members_used = _basket_close(basket, start, end)
     if not members_used:
@@ -206,7 +241,7 @@ def compute_sector(sector_name: str, basket: list[str], start: str, end: str, vn
     rs = _rs_dimension(basket_df, vni_df)
     breadth = _breadth_dimension(basket, start, end)
     flow = _flow_dimension(basket)
-    cycle = {"label": "missing", "note": "phase_2_pending"}
+    cycle = _cycle_dimension(sector_name)
 
     # Score
     s = 0

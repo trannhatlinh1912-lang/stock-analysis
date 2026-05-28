@@ -1,0 +1,45 @@
+# Banking NPL ratio — manual quarterly from CTCK reports.
+# Stale > 90 days → banking Tier 1 sizing blocked, max Tier 2.
+#
+# Source: VCBS / SSI / VNDirect / BSC Banking sector reports quarterly.
+#
+# Per-ticker schema:
+#   npl_pct: NPL ratio %
+#   npl_ratio_growth_qoq_pp: change in pp vs prior quarter
+#   provision_coverage_pct: dự phòng bao phủ %
+#   source: citation
+#
+# L3 spec: bullish if NPL declining AND NIM expanding.
+
+last_updated: 2026-05-29
+
+tickers:
+  VCB:
+    npl_pct: 1.05
+    npl_ratio_growth_qoq_pp: -0.02
+    provision_coverage_pct: 220
+    source: "TODO: VCBS Banking Q1-2026"
+  MBB:
+    npl_pct: 1.35
+    npl_ratio_growth_qoq_pp: +0.05
+    provision_coverage_pct: 180
+    source: "TODO"
+  ACB:
+    npl_pct: 1.20
+    npl_ratio_growth_qoq_pp: 0.00
+    provision_coverage_pct: 200
+    source: "TODO"
+  CTG:
+    npl_pct: 1.50
+    npl_ratio_growth_qoq_pp: +0.10
+    provision_coverage_pct: 160
+    source: "TODO"
+  TCB:
+    npl_pct: 1.10
+    npl_ratio_growth_qoq_pp: -0.05
+    provision_coverage_pct: 175
+    source: "TODO"
+
+notes: |
+  Placeholder demo values. User maintain quarterly after CTCK reports release.
+  Numbers ~ approximate VN banks 2025-2026 range, NOT verified.

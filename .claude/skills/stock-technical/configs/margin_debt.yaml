@@ -1,0 +1,37 @@
+# Margin debt — manual quarterly from SBV / SSC reports.
+# Stale > 30 days → L2 Market Regime NAV cap → Neutral max (70%).
+#
+# Source: https://www.ssi.com.vn/khach-hang-ca-nhan/quan-ly-rui-ro-margin (or SBV statistics page)
+# Vietnam margin debt ratio approximate latest: 8.5-9.0% of market cap (2025-2026).
+#
+# Fields:
+#   quarter: "QX-YYYY"
+#   margin_debt_billion_vnd: total broker margin loans
+#   market_equity_billion_vnd: total HOSE+HNX market cap
+#   ratio_pct: derived = margin / market_equity * 100
+#   source: citation
+#
+# Threshold rules (L2 spec):
+#   safe       < 50%
+#   elevated   50-80%
+#   stretched  > 80%
+
+last_updated: 2026-05-29
+
+latest:
+  quarter: "Q1-2026"
+  margin_debt_billion_vnd: 320_000
+  market_equity_billion_vnd: 7_200_000
+  ratio_pct: 4.44
+  source: "TODO: paste SSC/SBV link or VCBS Q1-2026 macro note"
+  notes: "Placeholder demo value. Replace với data thật khi user maintain quarterly."
+
+history:
+  - quarter: "Q4-2025"
+    margin_debt_billion_vnd: 305_000
+    ratio_pct: 4.20
+    source: "TODO"
+  - quarter: "Q3-2025"
+    margin_debt_billion_vnd: 280_000
+    ratio_pct: 3.95
+    source: "TODO"

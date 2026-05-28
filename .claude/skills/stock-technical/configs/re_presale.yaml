@@ -1,0 +1,40 @@
+# Real Estate presale velocity — manual quarterly from CTCK reports.
+# Stale > 90 days → RE Tier 1 sizing blocked.
+#
+# Source: VCBS / SSI Real Estate sector report. CafeF/VietStock company notes.
+#
+# Per-ticker schema:
+#   presale_units_qoq_pct: change in presale volume QoQ
+#   backlog_months: months of inventory at current sales pace
+#   source
+
+last_updated: 2026-05-29
+
+tickers:
+  VHM:
+    presale_units_qoq_pct: +15
+    backlog_months: 18
+    source: "TODO: VCBS RE Q1-2026"
+  VIC:
+    presale_units_qoq_pct: -5
+    backlog_months: 24
+    source: "TODO"
+  KDH:
+    presale_units_qoq_pct: +20
+    backlog_months: 9
+    source: "TODO"
+  NLG:
+    presale_units_qoq_pct: +10
+    backlog_months: 12
+    source: "TODO"
+  DXG:
+    presale_units_qoq_pct: -20
+    backlog_months: 30
+    source: "TODO"
+  NVL:
+    presale_units_qoq_pct: -50
+    backlog_months: 48
+    source: "TODO — NVL restructuring, presale extremely weak"
+
+notes: |
+  Placeholder demo values. User maintain quarterly.

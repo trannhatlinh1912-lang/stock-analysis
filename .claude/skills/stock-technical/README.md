@@ -17,7 +17,19 @@ Python 3.11+ recommended (project uses 3.14).
 
 ## MODE 1 — Framework v3.0 daily pipeline
 
-End-to-end 14 steps. Run in order. Cached steps skip on re-run.
+### Quickest: one command
+
+```bash
+python3 scripts/run_daily.py            # full pipeline, skip cached, retry rate-limits
+python3 scripts/run_daily.py --quick    # skip slow refetch (~2 min total)
+python3 scripts/run_daily.py --force    # ignore cache, redo all
+```
+
+Output: `reports/screen_{DATE}.md` + `data/run_daily_log_{DATE}.json`.
+
+### Manual per-step (debugging)
+
+End-to-end run in order. Cached steps skip on re-run.
 
 ### One-time / quarterly refresh
 

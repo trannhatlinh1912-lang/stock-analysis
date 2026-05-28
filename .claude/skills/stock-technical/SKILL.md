@@ -59,9 +59,23 @@ Investment principle (locked 2026-05-28):
 
 ---
 
-## DAILY PIPELINE (14 steps)
+## DAILY PIPELINE
 
 Pre-requisites: `pip install vnstock pandas numpy yfinance pyyaml`.
+
+### One-command (recommended)
+
+```bash
+python3 scripts/run_daily.py            # full daily run with skip-on-fresh-cache
+python3 scripts/run_daily.py --quick    # skip slow refetch steps (use cached fundamentals + price CSV)
+python3 scripts/run_daily.py --force    # ignore cache, redo all steps
+```
+
+`run_daily.py` chains all 20 steps with: skip-on-fresh-cache, rate-limit retry (sleep 60s + retry once), per-step timing log, exit code 1 only if critical step fails. Output: `data/run_daily_log_{DATE}.json` + `reports/screen_{DATE}.md`.
+
+Critical steps (failure → exit 1): market_context, market_regime, sector_regime, quality_gate, technical_runner, trading_mode, catalyst, valuation, lai, screen_watchlist.
+
+### Manual per-step (when needed)
 
 ```bash
 # 1. Fundamentals + liquidity (refresh after BCTC quarterly, else cached)
@@ -106,7 +120,7 @@ python3 scripts/sizing_calculator.py
 python3 scripts/entry_exit_plan.py
 ```
 
-Output of step 11: `reports/screen_{DATE}.md` + `data/screen_{DATE}.json`.
+Output: `reports/screen_{DATE}.md` + `data/screen_{DATE}.json` + `data/run_daily_log_{DATE}.json`.
 
 ---
 

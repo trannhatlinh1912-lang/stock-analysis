@@ -1,0 +1,23 @@
+# Steel sector overrides.
+# Tickers: HPG, HSG, NKG, TVN.
+#
+# Calibration (2026-05-28, n=760 ATR% obs from HPG+HSG, n=331 multi-OLS):
+#   ATR%: median 2.56%, P90 3.55%, P95 3.84%
+#   (lower vol than oil_gas — steel ổn định hơn so với refiner.)
+#
+#   Multi-driver OLS (n=331, R²=0.006, adj-R²=NEGATIVE):
+#     brent_ret_5d:    beta=-0.050, t=-1.18   not significant
+#     dxy_ret_20d:     beta=+0.045, t=+0.30   not significant
+#     usdvnd_ret_20d:  beta=-0.269, t=-0.68   not significant
+#   → NO significant macro drivers. Sector-specific macro penalties REMOVED.
+
+sizing:
+  atr_pct_low: 2.5                   # [calibrated 20-ticker]
+  atr_pct_high: 3.5                  # [calibrated 20-ticker, P90]
+
+liquidity:
+  floor_thousand_vnd: 6_000_000
+
+macro_penalties: []
+
+sector_label: "steel"

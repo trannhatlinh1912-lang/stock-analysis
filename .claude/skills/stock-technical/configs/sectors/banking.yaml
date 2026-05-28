@@ -1,0 +1,25 @@
+# Banking sector overrides.
+# Tickers: VCB, BID, CTG, MBB, TCB, ACB, VPB, HDB, STB, TPB, VIB, LPB, SHB, SSB.
+#
+# Calibration (2026-05-28, n=1650 ATR% obs, n=331 multi-OLS):
+#   ATR%: median 1.93%, P90 3.21%, P95 3.47%
+#
+#   Multi-driver OLS (n=331, R²=0.0065, adj-R²=NEGATIVE):
+#     brent_ret_5d:    beta=-0.027, t=-0.91   not significant
+#     dxy_ret_20d:     beta=-0.019, t=-0.18   not significant
+#     usdvnd_ret_20d:  beta=-0.296, t=-1.07   not significant
+#   → NO significant macro drivers. Banking 5D return on this sample
+#     uncorrelated with Brent/DXY/USDVND. Sector-specific macro penalties REMOVED.
+
+sizing:
+  atr_pct_low: 1.9                   # [calibrated 20-ticker]
+  atr_pct_high: 3.2                  # [calibrated 20-ticker, P90]
+
+liquidity:
+  floor_thousand_vnd: 10_000_000
+
+# No sector-specific macro penalties — multi-OLS shows no significant driver.
+# Universal foreign_net_sell rule (in default.yaml) still applies.
+macro_penalties: []
+
+sector_label: "banking"

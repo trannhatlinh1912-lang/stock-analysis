@@ -1,0 +1,45 @@
+# Portfolio state — user maintains.
+# Used by Layer 8 sizing for cap chain enforcement.
+
+last_updated: 2026-05-28
+nav_total_vnd: 100_000_000  # Adjust to actual NAV
+cash_vnd: 100_000_000
+cash_buffer_min_pct: 10  # Always ≥10% NAV cash (Layer 8 rule)
+
+# Open positions (empty = no positions)
+positions: []
+# Example entry shape:
+# - ticker: VCB
+#   mode: core
+#   entry_date: 2026-05-28
+#   entry_price_vnd: 65000
+#   size_vnd: 15_000_000
+#   size_pct_nav: 15.0
+#   sector: banking
+#   conviction_tier: 1
+#   catalyst_id: rate_cut_q3_2026
+#   stops:
+#     primary_vnd: 58500
+#     hard_vnd: 55000
+#   targets:
+#     primary_vnd: 80000
+#     secondary_vnd: 95000
+
+# Sector allocation tracking (auto-computed from positions, manual override allowed)
+sector_allocations_pct_nav:
+  banking: 0
+  oil_gas: 0
+  real_estate: 0
+  steel: 0
+  consumer: 0
+  tech: 0
+  securities: 0
+
+# Mode allocation tracking
+mode_allocations_pct_nav:
+  core: 0
+  swing: 0
+  t_plus: 0
+
+# Total deployed = sum positions size_pct_nav
+total_deployed_pct_nav: 0

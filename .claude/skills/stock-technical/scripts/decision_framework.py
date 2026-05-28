@@ -33,6 +33,70 @@ REPORTS_DIR = REPO_ROOT / "reports"
 DATA_DIR.mkdir(exist_ok=True)
 REPORTS_DIR.mkdir(exist_ok=True)
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config_loader import (  # noqa: E402
+    load_config,
+    eval_macro_penalties,
+    eval_custom_risks,
+    SECTOR_MAP,
+)
+
+PIPELINE_VERSION = "2.6.0-2026-05-28-fully-calibrated"
+
+
+def _cfg_to_flat(cfg: dict) -> dict:
+    """Flatten YAML config sections into the old CONFIG dict shape for callers
+    that still read it directly. Keeps backwards compat with existing helpers
+    (e.g. _atr_scale_factor, _liquidity_status)."""
+    sizing = cfg.get("sizing", {}) or {}
+    liq = cfg.get("liquidity", {}) or {}
+    sc = cfg.get("scoring", {}) or {}
+    adx = cfg.get("adx", {}) or {}
+    return {
+        "risk_pct_nav": float(sizing.get("risk_pct_nav", 1.0)),
+        "max_size_pct_nav": float(sizing.get("max_size_pct_nav", 20.0)),
+        "vol_target_daily_pct": float(sizing.get("vol_target_daily_pct", 1.5)),
+        "atr_pct_low": float(sizing.get("atr_pct_low", 1.5)),
+        "atr_pct_high": float(sizing.get("atr_pct_high", 5.0)),
+        "liquidity_floor_turnover_thousand_vnd": float(liq.get("floor_thousand_vnd", 5_000_000.0)),
+        "illiquid_size_cap_pct_nav": float(liq.get("illiquid_size_cap_pct_nav", 5.0)),
+        "exhaustion_score_cap": int(sc.get("exhaustion_score_cap", 68)),
+        "triple_risk_penalty": int(sc.get("triple_risk_penalty", 5)),
+        "target_max_dist_pct": float(sc.get("target_max_dist_pct", 12.0)),
+        "adx_strong": float(adx.get("strong", 25.0)),
+        "adx_developing": float(adx.get("developing", 20.0)),
+    }
+
+
+# Loaded per-symbol in build_snapshot. Initialised here for module-level callers.
+CONFIG = _cfg_to_flat(load_config("DEFAULT"))
+
+# Backwards-compat aliases (used by older code paths within this file).
+MAX_SIZE_PCT_NAV = CONFIG["max_size_pct_nav"]
+RISK_PCT_NAV = CONFIG["risk_pct_nav"]
+TARGET_MAX_DIST_PCT = CONFIG["target_max_dist_pct"]
+
+
+def apply_macro_penalty(
+    score: int,
+    symbol: str,
+    macro: dict | None,
+    foreign: dict | None,
+    cfg: dict | None = None,
+) -> tuple[int, list[str]]:
+    """Apply macro penalty via YAML-defined rules merged for this symbol.
+
+    Delegates to config_loader.eval_macro_penalties so the rule set is fully
+    data-driven. Caller passes the resolved per-symbol cfg if available;
+    otherwise it is loaded here.
+    """
+    if cfg is None:
+        cfg = load_config(symbol)
+    rules = cfg.get("macro_penalties", []) or []
+    delta, notes = eval_macro_penalties(rules, macro, foreign)
+    new_score = max(0, min(100, score + delta))
+    return new_score, notes
+
 
 # ---------------------------------------------------------------------------
 # Loading + helpers
@@ -91,7 +155,16 @@ def _round_to(x: float, step: int) -> float:
 # ---------------------------------------------------------------------------
 
 
-def _is_breakout_confirmed(r: pd.Series) -> bool:
+def _state_cfg(cfg: dict | None) -> dict:
+    if cfg is None:
+        return {}
+    return cfg.get("state_classifier", {}) or {}
+
+
+def _is_breakout_confirmed(r: pd.Series, cfg: dict | None = None) -> bool:
+    p = _state_cfg(cfg).get("breakout_confirmed", {})
+    vol_min = float(p.get("vol_ratio_min", 1.5))
+    ret_min = float(p.get("ret_1d_min_pct", 2.0))
     close = _val(r, "close")
     s20 = _val(r, "sma20")
     s50 = _val(r, "sma50")
@@ -103,22 +176,27 @@ def _is_breakout_confirmed(r: pd.Series) -> bool:
         return False
     return (
         close > s20 and close > s50 and close > s200
-        and vr >= 1.5 and ret1 > 2.0 and mh > 0.0
+        and vr >= vol_min and ret1 > ret_min and mh > 0.0
     )
 
 
-def _is_breakout_with_exhaustion(r: pd.Series) -> bool:
-    if not _is_breakout_confirmed(r):
+def _is_breakout_with_exhaustion(r: pd.Series, cfg: dict | None = None) -> bool:
+    if not _is_breakout_confirmed(r, cfg):
         return False
+    p = _state_cfg(cfg).get("breakout_with_exhaustion", {})
+    stoch_min = float(p.get("stoch_k_min", 90.0))
+    vol_min = float(p.get("vol_ratio_min", 2.0))
     bb = _str(r, "bb_position")
     sk = _val(r, "stoch_k")
     vr = _val(r, "vol_ratio")
     if bb is None or sk is None or vr is None:
         return False
-    return bb == "above_upper" and sk >= 90.0 and vr >= 2.0
+    return bb == "above_upper" and sk >= stoch_min and vr >= vol_min
 
 
-def _is_bullish_trend_confirmed(r: pd.Series) -> bool:
+def _is_bullish_trend_confirmed(r: pd.Series, cfg: dict | None = None) -> bool:
+    p = _state_cfg(cfg).get("bullish_trend_confirmed", {})
+    vol_min = float(p.get("vol_ratio_min", 1.0))
     close = _val(r, "close")
     s20 = _val(r, "sma20")
     s50 = _val(r, "sma50")
@@ -130,11 +208,17 @@ def _is_bullish_trend_confirmed(r: pd.Series) -> bool:
         return False
     return (
         close > s20 > s50 > s100 > s200
-        and mh > 0.0 and vr >= 1.0
+        and mh > 0.0 and vr >= vol_min
     )
 
 
-def _is_accumulation(r: pd.Series) -> bool:
+def _is_accumulation(r: pd.Series, cfg: dict | None = None) -> bool:
+    p = _state_cfg(cfg).get("accumulation", {})
+    near_mult = float(p.get("near_ma_atr_mult", 1.0))
+    vr_low = float(p.get("vol_ratio_low", 0.8))
+    vr_high = float(p.get("vol_ratio_high", 1.5))
+    rsi_min = float(p.get("rsi_min", 45.0))
+    rsi_max = float(p.get("rsi_max", 60.0))
     close = _val(r, "close")
     s20 = _val(r, "sma20")
     s50 = _val(r, "sma50")
@@ -145,20 +229,19 @@ def _is_accumulation(r: pd.Series) -> bool:
     bb = _str(r, "bb_position")
     if any(v is None for v in (close, atr, vr)):
         return False
-    # close gần SMA20 hoặc SMA50 trong vòng 1 ATR
     near_sma = False
-    if s20 is not None and abs(close - s20) <= atr:
+    if s20 is not None and abs(close - s20) <= near_mult * atr:
         near_sma = True
-    if s50 is not None and abs(close - s50) <= atr:
+    if s50 is not None and abs(close - s50) <= near_mult * atr:
         near_sma = True
     if not near_sma:
         return False
-    if not (0.8 <= vr <= 1.5):
+    if not (vr_low <= vr <= vr_high):
         return False
     momentum_ok = False
     if mh is not None and mh >= 0.0:
         momentum_ok = True
-    if rsi is not None and 45.0 <= rsi <= 60.0:
+    if rsi is not None and rsi_min <= rsi <= rsi_max:
         momentum_ok = True
     if not momentum_ok:
         return False
@@ -167,7 +250,7 @@ def _is_accumulation(r: pd.Series) -> bool:
     return True
 
 
-def _is_distribution(r: pd.Series) -> bool:
+def _is_distribution(r: pd.Series, cfg: dict | None = None) -> bool:
     close = _val(r, "close")
     s20 = _val(r, "sma20")
     mh = _val(r, "macd_hist")
@@ -178,17 +261,17 @@ def _is_distribution(r: pd.Series) -> bool:
     return close < s20 and mh < 0.0 and cmf < 0.0 and obv_sl < 0.0
 
 
-def determine_state(r: pd.Series) -> str:
-    """Return technical_state under the fixed priority order."""
-    if _is_distribution(r):
+def determine_state(r: pd.Series, cfg: dict | None = None) -> str:
+    """Return technical_state under fixed priority order. Thresholds in cfg."""
+    if _is_distribution(r, cfg):
         return "DISTRIBUTION"
-    if _is_breakout_with_exhaustion(r):
+    if _is_breakout_with_exhaustion(r, cfg):
         return "BREAKOUT_WITH_EXHAUSTION_RISK"
-    if _is_bullish_trend_confirmed(r):
+    if _is_bullish_trend_confirmed(r, cfg):
         return "BULLISH_TREND_CONFIRMED"
-    if _is_breakout_confirmed(r):
+    if _is_breakout_confirmed(r, cfg):
         return "BREAKOUT_CONFIRMED"
-    if _is_accumulation(r):
+    if _is_accumulation(r, cfg):
         return "ACCUMULATION"
     return "WATCH"
 
@@ -198,7 +281,19 @@ def determine_state(r: pd.Series) -> str:
 # ---------------------------------------------------------------------------
 
 
-def compute_key_risks(r: pd.Series) -> list[str]:
+def compute_key_risks(r: pd.Series, cfg: dict | None = None) -> list[str]:
+    t = (cfg or {}).get("risk_thresholds", {}) if cfg else {}
+    rsi_overbought = float(t.get("rsi_overbought", 75.0))
+    rsi_oversold = float(t.get("rsi_oversold", 25.0))
+    near_52h = float(t.get("near_52w_high_dist_pct", -3.0))
+    near_52l = float(t.get("near_52w_low_dist_pct", 5.0))
+    sma100_low = float(t.get("near_sma100_lower_band_pct", -2.0))
+    sma100_high = float(t.get("near_sma100_upper_band_pct", 0.0))
+    cmf_cutoff = float(t.get("cmf_distribution_cutoff", -0.05))
+    exh_ret = float(t.get("exhaustion_ret_1d_min_pct", 5.0))
+    exh_vr = float(t.get("exhaustion_vol_ratio_min", 2.0))
+    exh_sk = float(t.get("exhaustion_stoch_k_min", 90.0))
+
     risks: list[str] = []
 
     close = _val(r, "close")
@@ -217,29 +312,26 @@ def compute_key_risks(r: pd.Series) -> list[str]:
     dist_52h = _val(r, "dist_52w_high_pct")
     dist_52l = _val(r, "dist_52w_low_pct")
 
-    # Breakout exhaustion
     if (
         bb == "above_upper"
-        and vr is not None and vr >= 2.0
-        and sk is not None and sk >= 90.0
-        and ret1 is not None and ret1 >= 5.0
+        and vr is not None and vr >= exh_vr
+        and sk is not None and sk >= exh_sk
+        and ret1 is not None and ret1 >= exh_ret
     ):
         risks.append(
             "breakout_exhaustion_risk: giá tăng mạnh vượt Bollinger Upper với "
             "volume spike và Stoch quá nóng; rủi ro pullback/throwback 1-5 phiên cao."
         )
 
-    # Near SMA100 resistance
     if (
         close is not None and s100 is not None and close < s100
-        and dist_s100 is not None and -2.0 <= dist_s100 <= 0.0
+        and dist_s100 is not None and sma100_low <= dist_s100 <= sma100_high
     ):
         risks.append(
             "near_sma100_resistance: giá đang sát dưới SMA100, cần vượt và "
             "giữ trên SMA100 để xác nhận trend trung hạn."
         )
 
-    # Strict MA alignment
     if all(v is not None for v in (close, s20, s50, s100, s200)):
         if not (close > s20 > s50 > s100 > s200):
             risks.append(
@@ -247,24 +339,20 @@ def compute_key_risks(r: pd.Series) -> list[str]:
                 "xu hướng trung hạn chưa xác nhận."
             )
 
-    # RSI extremes
-    if rsi is not None and rsi >= 75:
+    if rsi is not None and rsi >= rsi_overbought:
         risks.append(f"rsi_overbought ({rsi:.1f}): rủi ro pullback ngắn hạn.")
-    if rsi is not None and rsi <= 25:
+    if rsi is not None and rsi <= rsi_oversold:
         risks.append(f"rsi_oversold ({rsi:.1f}): bounce hoặc capitulation.")
 
-    # CMF divergence on trend
-    if cmf is not None and cmf < -0.05 and close is not None and s50 is not None and close > s50:
+    if cmf is not None and cmf < cmf_cutoff and close is not None and s50 is not None and close > s50:
         risks.append("cmf_distribution_divergence: giá trên SMA50 nhưng CMF20 âm.")
 
-    # MACD fade
     if mh is not None and mh < 0 and _val(r, "macd") is not None and _val(r, "macd") > 0:
         risks.append("macd_momentum_fade: MACD trên 0 nhưng histogram âm.")
 
-    # 52W proximity
-    if dist_52h is not None and dist_52h > -3:
+    if dist_52h is not None and dist_52h > near_52h:
         risks.append("near_52w_high: rủi ro failed breakout.")
-    if dist_52l is not None and dist_52l < 5:
+    if dist_52l is not None and dist_52l < near_52l:
         risks.append("near_52w_low: rủi ro tiếp diễn xu hướng giảm.")
 
     return risks
@@ -275,63 +363,80 @@ def compute_key_risks(r: pd.Series) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _eval_rubric_signal(
+    sig: dict, r: pd.Series, key_risks: list[str]
+) -> bool | None:
+    """Evaluate a single rubric signal. Returns True/False or None if missing data."""
+    cond = sig.get("condition", "")
+    if cond.startswith("_risk:"):
+        risk_id = cond.split(":", 1)[1].strip()
+        return any(risk_id in kr for kr in key_risks)
+
+    ns: dict[str, Any] = {}
+    for key in ("close", "sma20", "sma50", "sma100", "sma200",
+                "vol_ratio", "macd_hist", "obv_slope_20d", "mfi14",
+                "stoch_k", "cmf20", "atr14", "atr_pct", "adx14",
+                "plus_di14", "minus_di14"):
+        ns[key] = _val(r, key)
+    ns["bb_position"] = _str(r, "bb_position")
+    ns["ichi_cloud_position"] = _str(r, "ichi_cloud_position")
+    if any(ns.get(k) is None for k in ("close",) if k in cond):
+        return None
+    try:
+        return bool(eval(cond, {"__builtins__": {}}, ns))  # noqa: S307
+    except Exception:
+        return None
+
+
 def compute_score(
-    r: pd.Series, key_risks: list[str], state: str
-) -> dict[str, int]:
-    """Return {raw_score, adjusted_score, final_score}.
+    r: pd.Series, key_risks: list[str], state: str, cfg: dict | None = None
+) -> dict:
+    """Return {raw_score, adjusted_score, final_score, score_audit}.
 
-    - raw_score: from the base rubric (close vs MA, volume, momentum, money flow).
-    - adjusted_score: raw - 5 extra if the GAS-style triple-risk combo is present
-      (breakout_exhaustion_risk + near_sma100_resistance + trend_not_fully_aligned).
-    - final_score: clamped 0..100 and capped at 68 when state is
-      BREAKOUT_WITH_EXHAUSTION_RISK.
+    Rubric signals + weights are read from cfg['score_rubric']['signals'] (loaded
+    from configs/default.yaml). Each signal contributes its weight when condition
+    evaluates True. NaN/missing → signal skipped (recorded as None).
     """
-    score = 50
-    close = _val(r, "close")
-    s50 = _val(r, "sma50")
-    s100 = _val(r, "sma100")
-    s200 = _val(r, "sma200")
-    vr = _val(r, "vol_ratio")
-    mh = _val(r, "macd_hist")
-    obv_sl = _val(r, "obv_slope_20d")
-    mfi = _val(r, "mfi14")
-    bb = _str(r, "bb_position")
-    sk = _val(r, "stoch_k")
-    cmf = _val(r, "cmf20")
+    if cfg is None:
+        cfg = load_config(getattr(r, "name", "DEFAULT"))
+    rubric = cfg.get("score_rubric", {}) or {}
+    base = int(rubric.get("base", 50))
+    signals = rubric.get("signals", []) or []
 
-    if close is not None and s50 is not None and close > s50:
-        score += 10
-    if close is not None and s200 is not None and close > s200:
-        score += 10
-    if vr is not None and vr >= 1.5:
-        score += 10
-    if mh is not None and mh > 0:
-        score += 8
-    if obv_sl is not None and obv_sl > 0:
-        score += 5
-    if mfi is not None and 50.0 <= mfi <= 80.0:
-        score += 5
-    if close is not None and s100 is not None and close < s100:
-        score -= 8
-    if bb == "above_upper" and sk is not None and sk >= 90.0:
-        score -= 8
-    if cmf is not None and cmf < 0:
-        score -= 5
-    if any("trend_not_fully_aligned" in kr for kr in key_risks):
-        score -= 5
+    score = base
+    audit: list[dict] = []
+    for sig in signals:
+        sig_id = sig.get("id", "")
+        weight = int(sig.get("weight", 0))
+        triggered = _eval_rubric_signal(sig, r, key_risks)
+        if triggered is True:
+            score += weight
+            audit.append({"id": sig_id, "triggered": True, "weight": weight, "applied": weight})
+        elif triggered is False:
+            audit.append({"id": sig_id, "triggered": False, "weight": weight, "applied": 0})
+        else:
+            audit.append({"id": sig_id, "triggered": None, "weight": weight, "applied": 0,
+                          "note": "missing_data"})
 
     raw_score = score
+
+    sc = cfg.get("scoring", {}) or {}
+    triple_penalty = int(sc.get("triple_risk_penalty", 5))
+    exhaustion_cap = int(sc.get("exhaustion_score_cap", 100))
 
     has_exhaustion = any("breakout_exhaustion_risk" in kr for kr in key_risks)
     has_near_sma100 = any("near_sma100_resistance" in kr for kr in key_risks)
     has_not_aligned = any("trend_not_fully_aligned" in kr for kr in key_risks)
     triple = has_exhaustion and has_near_sma100 and has_not_aligned
 
-    adjusted_score = raw_score - 5 if triple else raw_score
+    adjusted_score = raw_score - triple_penalty if triple else raw_score
 
     final_score = adjusted_score
-    if state == "BREAKOUT_WITH_EXHAUSTION_RISK":
-        final_score = min(final_score, 68)
+    cap_applied = False
+    if state == "BREAKOUT_WITH_EXHAUSTION_RISK" and exhaustion_cap < 100:
+        if final_score > exhaustion_cap:
+            final_score = exhaustion_cap
+            cap_applied = True
     final_score = max(0, min(100, int(final_score)))
 
     return {
@@ -339,7 +444,8 @@ def compute_score(
         "adjusted_score": int(adjusted_score),
         "final_score": int(final_score),
         "triple_risk_penalty_applied": bool(triple),
-        "exhaustion_cap_applied": state == "BREAKOUT_WITH_EXHAUSTION_RISK",
+        "exhaustion_cap_applied": bool(cap_applied),
+        "score_audit": audit,
     }
 
 
@@ -646,6 +752,475 @@ DOWNGRADE_CONDITIONS = [
 
 
 # ---------------------------------------------------------------------------
+# Risk / reward + position sizing
+# ---------------------------------------------------------------------------
+
+def _nearest_target(close: float, resistance: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """First resistance level above close within TARGET_MAX_DIST_PCT."""
+    if not resistance or close is None:
+        return None
+    for lvl in resistance:
+        # Confluence levels expose lower/upper; use lower as the target.
+        if lvl.get("type") == "confluence_resistance":
+            target = float(lvl.get("lower"))
+        else:
+            target = float(lvl.get("level"))
+        if target <= close:
+            continue
+        dist_pct = (target - close) / close * 100.0
+        if dist_pct > TARGET_MAX_DIST_PCT:
+            continue
+        return {"name": lvl.get("name"), "level": target, "dist_pct": round(dist_pct, 2)}
+    # Fall back to the first one above close even if it's far.
+    for lvl in resistance:
+        target = float(lvl.get("lower") if lvl.get("type") == "confluence_resistance" else lvl.get("level"))
+        if target > close:
+            return {
+                "name": lvl.get("name"),
+                "level": target,
+                "dist_pct": round((target - close) / close * 100.0, 2),
+            }
+    return None
+
+
+def _atr_scale_factor(atr_pct: float | None) -> float:
+    """Return [0..1] multiplier on position size based on ATR%.
+
+    atr_pct ≤ CONFIG['atr_pct_low'] (1.5%) → 1.0
+    atr_pct ≥ CONFIG['atr_pct_high'] (5%)  → CONFIG['atr_pct_low']/atr_pct
+    in between: linear interpolation.
+    """
+    if atr_pct is None or atr_pct <= 0:
+        return 1.0
+    lo = CONFIG["atr_pct_low"]
+    hi = CONFIG["atr_pct_high"]
+    if atr_pct <= lo:
+        return 1.0
+    if atr_pct >= hi:
+        return float(lo / atr_pct)
+    # Linear: at hi → lo/hi, at lo → 1.0
+    edge = lo / hi
+    frac = (atr_pct - lo) / (hi - lo)
+    return float(1.0 - frac * (1.0 - edge))
+
+
+def annotate_zones_with_rr(
+    zones: list[dict[str, Any]],
+    primary_stop: float | None,
+    target: dict[str, Any] | None,
+    atr_pct: float | None = None,
+    liquidity_ok: bool = True,
+) -> list[dict[str, Any]]:
+    """Add risk_reward, size_pct_nav, notional_per_100m_nav, low_rr_warning."""
+    if primary_stop is None or target is None:
+        return zones
+
+    target_level = float(target["level"])
+    annotated: list[dict[str, Any]] = []
+    for z in zones:
+        z2 = dict(z)
+        # Use the zone midpoint as the assumed entry; for single-level zones, use level.
+        if "lower" in z2 and "upper" in z2:
+            entry = (float(z2["lower"]) + float(z2["upper"])) / 2.0
+        elif "level" in z2:
+            entry = float(z2["level"])
+        else:
+            annotated.append(z2)
+            continue
+
+        risk_per_share = entry - primary_stop
+        reward_per_share = target_level - entry
+        z2["entry_ref"] = round(entry, 4)
+        z2["target_ref"] = round(target_level, 4)
+        if risk_per_share <= 0 or reward_per_share <= 0:
+            z2["risk_reward"] = None
+            z2["size_pct_nav"] = None
+            z2["low_rr_warning"] = True
+            if risk_per_share <= 0:
+                z2["rr_invalid_reason"] = "entry_below_or_at_primary_stop"
+            else:
+                z2["rr_invalid_reason"] = "entry_above_or_at_target"
+            annotated.append(z2)
+            continue
+
+        rr = reward_per_share / risk_per_share
+        size_pct_raw = (RISK_PCT_NAV / 100.0) / (risk_per_share / entry) * 100.0
+        atr_scale = _atr_scale_factor(atr_pct)
+        size_pct = size_pct_raw * atr_scale
+        size_pct = min(size_pct, MAX_SIZE_PCT_NAV)
+        if not liquidity_ok:
+            size_pct = min(size_pct, 5.0)  # hard cap for illiquid names
+        notional_per_100m = size_pct / 100.0 * 100_000_000
+
+        z2["risk_reward"] = round(rr, 2)
+        z2["size_pct_nav_raw"] = round(size_pct_raw, 2)
+        z2["atr_scale_factor"] = round(atr_scale, 3)
+        z2["size_pct_nav"] = round(size_pct, 2)
+        z2["notional_per_100m_nav"] = int(round(notional_per_100m))
+        z2["low_rr_warning"] = bool(rr < 1.5)
+        if not liquidity_ok:
+            z2["liquidity_warning"] = True
+        annotated.append(z2)
+    return annotated
+
+
+# ---------------------------------------------------------------------------
+# External context loaders (market, empirical)
+# ---------------------------------------------------------------------------
+
+
+def load_market_context() -> dict[str, Any] | None:
+    """Return today's cached market context if available."""
+    today = date.today().isoformat()
+    path = DATA_DIR / f"market_context_{today}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def load_empirical_stats(symbol: str) -> dict[str, Any] | None:
+    path = DATA_DIR / f"{symbol}_empirical_stats.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def load_macro_overlay() -> dict[str, Any] | None:
+    today = date.today().isoformat()
+    path = DATA_DIR / f"macro_overlay_{today}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def load_foreign_snapshot(symbol: str) -> dict[str, Any] | None:
+    path = DATA_DIR / f"{symbol}_foreign_snapshot.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def load_backtest_report(symbol: str) -> dict[str, Any] | None:
+    path = DATA_DIR / f"{symbol}_backtest.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def compute_relative_strength_inline(
+    symbol_close: pd.Series, symbol_dates: pd.Series, cfg: dict | None = None
+) -> dict[str, Any] | None:
+    """Compute RS using the cached VNINDEX price CSV (if present)."""
+    idx_csv = DATA_DIR / "VNINDEX_price_VCI.csv"
+    if not idx_csv.exists():
+        return None
+    p = (cfg or {}).get("base_bias", {}) if cfg else {}
+    leader_slope = float(p.get("rs_leader_slope_pct", 2.0))
+    laggard_slope = float(p.get("rs_laggard_slope_pct", -2.0))
+    try:
+        idx = pd.read_csv(idx_csv)
+        idx["time"] = pd.to_datetime(idx["time"])
+        sym = pd.DataFrame({"date": pd.to_datetime(symbol_dates), "sym_close": symbol_close.values})
+        merged = sym.merge(idx[["time", "close"]].rename(columns={"time": "date", "close": "idx_close"}), on="date")
+        if len(merged) < 25:
+            return None
+        rs = merged["sym_close"] / merged["idx_close"]
+        rs_now = float(rs.iloc[-1])
+        rs_20d = float(rs.iloc[-21])
+        slope_pct = (rs_now / rs_20d - 1.0) * 100.0
+        label = "leader" if slope_pct > leader_slope else "laggard" if slope_pct < laggard_slope else "inline"
+        return {
+            "rs_now": round(rs_now, 6),
+            "rs_slope_20d_pct": round(slope_pct, 3),
+            "label": label,
+        }
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Next-session playbook
+# ---------------------------------------------------------------------------
+
+
+def _compute_base_bias(
+    state: str,
+    final_score: int,
+    market_ctx: dict | None,
+    weekly_trend: str | None,
+    structure_label: str | None,
+    rs_label: str | None,
+    cfg: dict | None = None,
+) -> tuple[str, str]:
+    """Aggregate signals to directional bias. Thresholds from cfg.base_bias."""
+    p = (cfg or {}).get("base_bias", {}) if cfg else {}
+    bull_score = int(p.get("bullish_score_threshold", 70))
+    bear_score = int(p.get("bearish_score_threshold", 40))
+    bull_net = int(p.get("bullish_net_signals", 3))
+    ntb_net = int(p.get("neutral_to_bullish_net", 2))
+    bear_net = int(p.get("bearish_net_signals", -2))
+    ntb_bear = int(p.get("neutral_to_bearish_net", -1))
+
+    bullish_signals = 0
+    bearish_signals = 0
+    rationale_bits: list[str] = []
+
+    rationale_bits.append(f"score={final_score}")
+    if final_score >= bull_score:
+        bullish_signals += 1
+    elif final_score < bear_score:
+        bearish_signals += 1
+
+    if weekly_trend == "up":
+        bullish_signals += 1
+        rationale_bits.append("weekly_up")
+    elif weekly_trend == "down":
+        bearish_signals += 1
+        rationale_bits.append("weekly_down")
+
+    if market_ctx:
+        regime = market_ctx.get("regime")
+        if regime == "risk_on":
+            bullish_signals += 1
+            rationale_bits.append("market_risk_on")
+        elif regime == "risk_off":
+            bearish_signals += 1
+            rationale_bits.append("market_risk_off")
+        else:
+            rationale_bits.append(f"market_{regime}")
+
+    if structure_label == "uptrend_structure":
+        bullish_signals += 1
+        rationale_bits.append("structure_up")
+    elif structure_label == "downtrend_structure":
+        bearish_signals += 1
+        rationale_bits.append("structure_down")
+
+    if rs_label == "leader":
+        bullish_signals += 1
+        rationale_bits.append("rs_leader")
+    elif rs_label == "laggard":
+        bearish_signals += 1
+        rationale_bits.append("rs_laggard")
+
+    if state == "DISTRIBUTION":
+        bearish_signals += 2
+        rationale_bits.append("state_distribution")
+    elif state == "BREAKOUT_WITH_EXHAUSTION_RISK":
+        rationale_bits.append("state_exhaustion")
+
+    net = bullish_signals - bearish_signals
+    if net >= bull_net:
+        bias = "bullish"
+    elif net >= ntb_net:
+        bias = "neutral_to_bullish"
+    elif net <= bear_net:
+        bias = "bearish"
+    elif net <= ntb_bear:
+        bias = "neutral_to_bearish"
+    else:
+        bias = "neutral"
+    return bias, " + ".join(rationale_bits)
+
+
+def _build_scenarios(
+    state: str,
+    close: float | None,
+    primary_stop: float | None,
+    hard_stop: float | None,
+    swing_high_20: float | None,
+    target: dict | None,
+    bias: str,
+) -> list[dict[str, Any]]:
+    """Four named scenarios for next session."""
+    sh = f"{swing_high_20:.2f}" if swing_high_20 else "swing_high_20"
+    ps = f"{primary_stop:.2f}" if primary_stop else "primary_stop"
+    hs = f"{hard_stop:.2f}" if hard_stop else "hard_stop"
+    tgt = f"{target['level']:.2f}" if target else "kháng cự kế tiếp"
+
+    if state == "BREAKOUT_WITH_EXHAUSTION_RISK":
+        gap_up_action = (
+            f"Không đuổi. Đợi 30-60 phút retest về {sh} hoặc VWAP. "
+            f"Nếu giữ vùng đó với volume duy trì → mua thăm dò 30% size, stop dưới {ps}."
+        )
+        trend_up_action = (
+            f"Hold-and-add chỉ khi đóng nến 1H trên {sh} với volume ≥ 1.2× MA20. "
+            f"Mua 30% size tại pullback nhẹ về {sh}; không full size do exhaustion."
+        )
+    elif state == "BULLISH_TREND_CONFIRMED":
+        gap_up_action = (
+            f"Có thể giữ vị thế. Không đuổi giá. Đợi retest về SMA20/swing_high_20 "
+            f"để gia tăng nếu cần."
+        )
+        trend_up_action = (
+            f"Mua 50% size tại retest_aggressive, add 50% nếu đóng nến 1H trên {sh}. "
+            f"Trail stop theo SMA20."
+        )
+    elif state == "ACCUMULATION":
+        gap_up_action = (
+            f"Gap up trong vùng tích lũy thường fake — fade về biên trên range, "
+            f"chốt 1/3 vị thế nếu đã có. Add chỉ khi đóng nến 1H trên {sh}."
+        )
+        trend_up_action = (
+            f"Mua 50% size tại biên dưới range hoặc retest SMA20/SMA50. "
+            f"Add 50% nếu vượt {sh} với volume."
+        )
+    elif state == "BREAKOUT_CONFIRMED":
+        gap_up_action = (
+            f"Đuổi 30% size nếu volume open ≥ 1.5× MA20; ưu tiên đợi retest về {sh} "
+            f"trong 30-60 phút để vào full size."
+        )
+        trend_up_action = (
+            f"Mua 50% size tại retest_aggressive (close − 0.5–1.0 ATR). Add 50% "
+            f"nếu đóng nến 1H trên {sh}. Stop {ps}."
+        )
+    elif state == "DISTRIBUTION":
+        gap_up_action = (
+            f"Bull-trap risk cao. Chốt phần còn lại của long position nếu chưa đóng. "
+            f"Tránh mua mới."
+        )
+        trend_up_action = (
+            f"Không hành động long. Chỉ trader ngắn hạn cân nhắc bounce-play với "
+            f"stop chặt; risk:reward thường ≤ 1."
+        )
+    else:  # WATCH
+        gap_up_action = (
+            f"Đợi 30-60 phút xác nhận. Nếu giữ trên {sh} với volume duy trì → "
+            f"mua thăm dò 30% size, stop {ps}."
+        )
+        trend_up_action = (
+            f"Mua 30% size khi đóng nến 1H trên {sh} với volume ≥ 1.2× MA20. "
+            f"Add 30% nếu duy trì sau 2 phiên."
+        )
+
+    gap_down_action = (
+        f"Đợi 30-60 phút. Nếu giữ trên {ps} → có thể mua thăm dò 30% size; "
+        f"thủng {hs} intraday → bỏ qua, không cố bắt dao rơi."
+    )
+    range_action = (
+        f"Không hành động. Đợi breakout trên {sh} hoặc breakdown dưới {ps} "
+        f"với volume xác nhận. Range bó hẹp 4H đầu = chờ."
+    )
+
+    return [
+        {
+            "name": "gap_up_strong",
+            "trigger": "Mở cửa gap +2% trở lên so với close phiên trước.",
+            "action": gap_up_action,
+            "invalidation": f"Đóng nến 1H dưới open hoặc dưới {ps}.",
+        },
+        {
+            "name": "gap_down",
+            "trigger": "Mở cửa gap -1.5% trở xuống.",
+            "action": gap_down_action,
+            "invalidation": f"Thủng {hs} intraday → cắt nếu đã long.",
+        },
+        {
+            "name": "trend_day_up",
+            "trigger": (
+                "Mở cửa flat-to-positive (±0.5%), giữ trên VWAP > 30 phút đầu, "
+                "volume > 1.2× MA20."
+            ),
+            "action": trend_up_action,
+            "invalidation": f"Đóng nến 1H dưới {ps} hoặc volume mất.",
+        },
+        {
+            "name": "range_day",
+            "trigger": "Mở cửa flat (±0.5%), range hẹp 4H đầu, volume thấp.",
+            "action": range_action,
+            "invalidation": f"Breakout {sh} hoặc breakdown {ps} chuyển sang scenario khác.",
+        },
+    ]
+
+
+def build_next_session_playbook(
+    state: str,
+    final_score: int,
+    last_row: pd.Series,
+    primary_stop: float | None,
+    hard_stop: float | None,
+    resistance: list[dict[str, Any]],
+    market_ctx: dict | None,
+    empirical: dict | None,
+    rs: dict | None,
+    cfg: dict | None = None,
+) -> dict[str, Any]:
+    close = _val(last_row, "close")
+    swing_h20 = _val(last_row, "swing_high_20")
+    weekly_trend = _str(last_row, "weekly_trend")
+    structure_label = _str(last_row, "structure_label")
+    rs_label = rs.get("label") if rs else None
+
+    bias, rationale = _compute_base_bias(
+        state, final_score, market_ctx, weekly_trend, structure_label, rs_label, cfg=cfg
+    )
+    target = _nearest_target(close, resistance) if close else None
+    scenarios = _build_scenarios(
+        state, close, primary_stop, hard_stop, swing_h20, target, bias
+    )
+
+    # Monitoring levels: must_hold, trigger_add, take_profit_1, take_profit_2
+    monitoring: dict[str, Any] = {}
+    if primary_stop is not None:
+        monitoring["must_hold"] = round(primary_stop, 4)
+    if swing_h20 is not None:
+        monitoring["trigger_add"] = round(swing_h20, 4)
+    # Take profit ladder from resistance list
+    tp_levels: list[float] = []
+    for lvl in resistance:
+        v = float(lvl.get("lower") if lvl.get("type") == "confluence_resistance" else lvl.get("level"))
+        if close is not None and v > close:
+            tp_levels.append(v)
+        if len(tp_levels) >= 2:
+            break
+    if len(tp_levels) >= 1:
+        monitoring["take_profit_1"] = round(tp_levels[0], 4)
+    if len(tp_levels) >= 2:
+        monitoring["take_profit_2"] = round(tp_levels[1], 4)
+
+    # Empirical bias snippet for this state, if any
+    empirical_bias: dict[str, Any] | None = None
+    if empirical and "by_state" in empirical:
+        st = empirical["by_state"].get(state)
+        if st:
+            empirical_bias = {
+                "state": state,
+                "n_samples": st["n_samples"],
+                "p_up_1d": st["p_up_1d"],
+                "p_up_5d": st["p_up_5d"],
+                "median_ret_5d_pct": st["median_ret_5d_pct"],
+                "hit_target_1atr_5d": st["hit_target_1atr_5d"],
+                "low_sample_warning": st["low_sample_warning"],
+            }
+
+    return {
+        "base_bias": bias,
+        "bias_rationale": rationale,
+        "weekly_trend": weekly_trend,
+        "structure_label": structure_label,
+        "scenarios": scenarios,
+        "monitoring_levels": monitoring,
+        "primary_target": target,
+        "empirical_bias": empirical_bias,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Status strings (for JSON output)
 # ---------------------------------------------------------------------------
 
@@ -726,6 +1301,92 @@ def _volatility_status(r: pd.Series) -> str:
     return f"atr_pct_{atr_pct:.2f}_{band}, bb_{bb}"
 
 
+def _adx_status(r: pd.Series) -> dict[str, Any]:
+    adx = _val(r, "adx14")
+    pdi = _val(r, "plus_di14")
+    mdi = _val(r, "minus_di14")
+    if adx is None:
+        return {"adx": None, "strength": "missing_data", "direction": "missing_data"}
+    if adx >= CONFIG["adx_strong"]:
+        strength = "strong"
+    elif adx >= CONFIG["adx_developing"]:
+        strength = "developing"
+    else:
+        strength = "weak_or_range"
+    if pdi is not None and mdi is not None:
+        direction = "bullish" if pdi > mdi else "bearish" if mdi > pdi else "flat"
+    else:
+        direction = "missing_data"
+    return {"adx": round(adx, 2), "strength": strength, "direction": direction,
+            "plus_di": round(pdi, 2) if pdi is not None else None,
+            "minus_di": round(mdi, 2) if mdi is not None else None}
+
+
+def _ichimoku_status(r: pd.Series) -> dict[str, Any]:
+    pos = _str(r, "ichi_cloud_position")
+    tenkan = _val(r, "ichi_tenkan")
+    kijun = _val(r, "ichi_kijun")
+    sa = _val(r, "ichi_senkou_a")
+    sb = _val(r, "ichi_senkou_b")
+    cloud_bull = (sa is not None and sb is not None and sa > sb)
+    tk_cross = None
+    if tenkan is not None and kijun is not None:
+        tk_cross = "bullish" if tenkan > kijun else "bearish" if tenkan < kijun else "flat"
+    return {
+        "cloud_position": pos,
+        "cloud_color": "bullish" if cloud_bull else ("bearish" if sa is not None and sb is not None else "missing"),
+        "tk_cross": tk_cross,
+        "tenkan": round(tenkan, 4) if tenkan is not None else None,
+        "kijun": round(kijun, 4) if kijun is not None else None,
+    }
+
+
+def _liquidity_status(r: pd.Series) -> dict[str, Any]:
+    turnover = _val(r, "turnover_20d_avg")
+    floor = CONFIG["liquidity_floor_turnover_thousand_vnd"]
+    if turnover is None:
+        return {"turnover_20d_avg_thousand_vnd": None, "ok": True, "note": "missing_data"}
+    ok = turnover >= floor
+    return {
+        "turnover_20d_avg_thousand_vnd": round(turnover, 0),
+        "floor_thousand_vnd": floor,
+        "ok": bool(ok),
+        "note": (
+            "đủ thanh khoản"
+            if ok else
+            f"dưới ngưỡng (turnover < {floor/1e6:.1f} tỷ VND/phiên) — giảm size về ≤5% NAV"
+        ),
+    }
+
+
+def _sub_state(state: str, r: pd.Series, cfg: dict | None = None) -> str | None:
+    """Sub-state for WATCH/DISTRIBUTION using ADX + Ichimoku + breakdown flag.
+    Thresholds from cfg.sub_state_thresholds."""
+    t = (cfg or {}).get("sub_state_thresholds", {}) if cfg else {}
+    bp_adx_max = float(t.get("watch_breakout_pending_adx_max", 20.0))
+    rb_adx_max = float(t.get("watch_range_bound_adx_max", 18.0))
+    rb_mh_abs = float(t.get("watch_range_bound_mh_abs_max", 0.01))
+
+    adx = _val(r, "adx14")
+    pdi = _val(r, "plus_di14")
+    mdi = _val(r, "minus_di14")
+    pos = _str(r, "ichi_cloud_position")
+    bd = _val(r, "breakdown_structural")
+    mh = _val(r, "macd_hist")
+    if state == "DISTRIBUTION":
+        if bd and bd > 0:
+            return "DISTRIBUTION_BREAKDOWN"
+        return "DISTRIBUTION_TREND"
+    if state == "WATCH":
+        if pos == "above_cloud" and adx is not None and adx < bp_adx_max:
+            return "WATCH_BREAKOUT_PENDING"
+        if pos == "below_cloud" and mdi is not None and pdi is not None and mdi > pdi:
+            return "WATCH_BOUNCE_PLAY"
+        if adx is not None and adx < rb_adx_max and mh is not None and abs(mh) < rb_mh_abs:
+            return "WATCH_RANGE_BOUND"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Final view (Vietnamese)
 # ---------------------------------------------------------------------------
@@ -761,10 +1422,19 @@ def _final_view(state: str, score: int, risks: list[str]) -> str:
 
 
 def build_snapshot(symbol: str, df: pd.DataFrame) -> dict[str, Any]:
+    # Load per-symbol config + mutate module-level CONFIG so existing helpers
+    # (which read CONFIG directly) pick up sector overrides.
+    per_symbol_cfg = load_config(symbol)
+    CONFIG.update(_cfg_to_flat(per_symbol_cfg))
+    global MAX_SIZE_PCT_NAV, RISK_PCT_NAV, TARGET_MAX_DIST_PCT
+    MAX_SIZE_PCT_NAV = CONFIG["max_size_pct_nav"]
+    RISK_PCT_NAV = CONFIG["risk_pct_nav"]
+    TARGET_MAX_DIST_PCT = CONFIG["target_max_dist_pct"]
+
     last = df.iloc[-1]
-    risks = compute_key_risks(last)
-    state = determine_state(last)
-    score_pkg = compute_score(last, risks, state)
+    risks = compute_key_risks(last, cfg=per_symbol_cfg)
+    state = determine_state(last, cfg=per_symbol_cfg)
+    score_pkg = compute_score(last, risks, state, cfg=per_symbol_cfg)
     final_score = score_pkg["final_score"]
     strategy = ENTRY_STRATEGY.get(state, "Chờ xác nhận thêm.")
     zones = compute_entry_zones(last)
@@ -772,32 +1442,121 @@ def build_snapshot(symbol: str, df: pd.DataFrame) -> dict[str, Any]:
     resistance = compute_resistance_levels(last)
     support = compute_support_levels(last)
 
+    primary_stop = stop.get("primary_stop") if isinstance(stop, dict) else None
+    hard_stop = stop.get("hard_stop") if isinstance(stop, dict) else None
+    close = _val(last, "close")
+
+    target = _nearest_target(close, resistance) if close is not None else None
+    atr_pct = _val(last, "atr_pct")
+    liquidity = _liquidity_status(last)
+    zones = annotate_zones_with_rr(
+        zones, primary_stop, target,
+        atr_pct=atr_pct,
+        liquidity_ok=liquidity.get("ok", True),
+    )
+
+    market_ctx = load_market_context()
+    empirical = load_empirical_stats(symbol)
+    rs = compute_relative_strength_inline(df["close"], df["date"], cfg=per_symbol_cfg)
+    macro = load_macro_overlay()
+    foreign = load_foreign_snapshot(symbol)
+    backtest = load_backtest_report(symbol)
+    adx_status = _adx_status(last)
+    ichi_status = _ichimoku_status(last)
+    sub_state = _sub_state(state, last, cfg=per_symbol_cfg)
+
+    # Macro-conditional score adjustment via YAML rules.
+    macro_adjusted_score, macro_notes = apply_macro_penalty(
+        final_score, symbol, macro, foreign, cfg=per_symbol_cfg
+    )
+    if macro_adjusted_score != final_score:
+        score_pkg["macro_adjusted_score"] = macro_adjusted_score
+        score_pkg["macro_penalty_notes"] = macro_notes
+        final_score = macro_adjusted_score
+
+    # Custom risks from sector/ticker config.
+    custom_risk_labels = eval_custom_risks(
+        per_symbol_cfg.get("custom_risks", []) or [], macro, foreign
+    )
+    if custom_risk_labels:
+        risks.extend(custom_risk_labels)
+
+    playbook = build_next_session_playbook(
+        state=state,
+        final_score=final_score,
+        last_row=last,
+        primary_stop=primary_stop,
+        hard_stop=hard_stop,
+        resistance=resistance,
+        market_ctx=market_ctx,
+        empirical=empirical,
+        rs=rs,
+        cfg=per_symbol_cfg,
+    )
+
     snapshot = {
         "symbol": symbol,
+        "pipeline_version": PIPELINE_VERSION,
+        "config": dict(CONFIG),
+        "resolved_config_sources": {
+            "sector": per_symbol_cfg.get("_sector"),
+            "default_yaml": "configs/default.yaml",
+            "sector_yaml": (
+                f"configs/sectors/{per_symbol_cfg.get('_sector')}.yaml"
+                if per_symbol_cfg.get("_sector") else None
+            ),
+            "ticker_yaml": (
+                f"configs/tickers/{symbol}.yaml"
+                if (REPO_ROOT / "configs" / "tickers" / f"{symbol}.yaml").exists()
+                else None
+            ),
+            "macro_penalty_rules_count": len(per_symbol_cfg.get("macro_penalties", []) or []),
+            "custom_risks_count": len(per_symbol_cfg.get("custom_risks", []) or []),
+        },
         "as_of": last["date"].strftime("%Y-%m-%d"),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "close": _val(last, "close"),
+        "close": close,
         "technical_state": state,
+        "sub_state": sub_state,
         "confidence_score": final_score,
         "raw_score": score_pkg["raw_score"],
         "adjusted_score": score_pkg["adjusted_score"],
         "score_breakdown": {
             "raw_score": score_pkg["raw_score"],
             "adjusted_score": score_pkg["adjusted_score"],
+            "macro_adjusted_score": score_pkg.get("macro_adjusted_score"),
             "final_score": final_score,
             "triple_risk_penalty_applied": score_pkg["triple_risk_penalty_applied"],
             "exhaustion_cap_applied": score_pkg["exhaustion_cap_applied"],
+            "macro_penalty_notes": score_pkg.get("macro_penalty_notes", []),
+            "sector": per_symbol_cfg.get("_sector"),
+            "rubric_audit": score_pkg.get("score_audit", []),
         },
         "trend_status": _trend_status(last),
         "momentum_status": _momentum_status(last),
         "volume_status": _volume_status(last),
         "money_flow_status": _money_flow_status(last),
         "volatility_status": _volatility_status(last),
+        "market_context": market_ctx,
+        "macro_overlay": macro,
+        "foreign_snapshot": foreign,
+        "backtest_summary": (
+            {k: backtest.get(k) for k in ("by_state", "overall", "as_of")}
+            if backtest else None
+        ),
+        "adx_status": adx_status,
+        "ichimoku_status": ichi_status,
+        "liquidity_status": liquidity,
+        "relative_strength": rs,
+        "weekly_trend": _str(last, "weekly_trend"),
+        "structure_label": _str(last, "structure_label"),
         "entry_strategy": strategy,
         "entry_zones": zones,
         "stop_loss": stop,
         "resistance_levels": resistance,
         "support_levels": support,
+        "primary_target": target,
+        "next_session_playbook": playbook,
         "upgrade_conditions": UPGRADE_CONDITIONS,
         "downgrade_conditions": DOWNGRADE_CONDITIONS,
         "key_risks": risks,
@@ -830,20 +1589,44 @@ def render_markdown(snap: dict[str, Any]) -> str:
 
     L.append("## 1. Technical state")
     L.append("")
-    L.append(f"- **{snap['technical_state']}**")
+    L.append(f"- **{snap['technical_state']}**" + (f" → sub: `{snap.get('sub_state')}`" if snap.get("sub_state") else ""))
     L.append(f"- trend_status: {snap['trend_status']}")
     L.append(f"- momentum_status: {snap['momentum_status']}")
     L.append(f"- volume_status: {snap['volume_status']}")
     L.append(f"- money_flow_status: {snap['money_flow_status']}")
     L.append(f"- volatility_status: {snap['volatility_status']}")
+    adx_st = snap.get("adx_status") or {}
+    if adx_st.get("adx") is not None:
+        L.append(
+            f"- adx_status: ADX={adx_st['adx']} ({adx_st['strength']}), "
+            f"+DI={adx_st.get('plus_di')} / -DI={adx_st.get('minus_di')} → {adx_st.get('direction')}"
+        )
+    ich = snap.get("ichimoku_status") or {}
+    if ich.get("cloud_position"):
+        L.append(
+            f"- ichimoku: {ich['cloud_position']}, cloud={ich.get('cloud_color')}, "
+            f"TK cross={ich.get('tk_cross')} (Tenkan={ich.get('tenkan')}, Kijun={ich.get('kijun')})"
+        )
+    liq = snap.get("liquidity_status") or {}
+    if liq:
+        L.append(
+            f"- liquidity: turnover_20d_avg={liq.get('turnover_20d_avg_thousand_vnd')} (thousand VND), "
+            f"ok={liq.get('ok')} — {liq.get('note')}"
+        )
     L.append("")
 
     L.append("## 2. Confidence score")
     L.append("")
     sb = snap["score_breakdown"]
+    if sb.get("sector"):
+        L.append(f"- sector: `{sb['sector']}`")
     L.append(f"- raw_score: **{sb['raw_score']}**")
     L.append(f"- adjusted_score: **{sb['adjusted_score']}**  "
              f"(triple_risk_penalty_applied: {sb['triple_risk_penalty_applied']})")
+    if sb.get("macro_adjusted_score") is not None:
+        L.append(f"- macro_adjusted_score: **{sb['macro_adjusted_score']}**")
+        for n in sb.get("macro_penalty_notes", []):
+            L.append(f"    - {n}")
     L.append(f"- final_score: **{sb['final_score']} / 100**  "
              f"(exhaustion_cap_applied: {sb['exhaustion_cap_applied']})")
     L.append("")
@@ -853,22 +1636,47 @@ def render_markdown(snap: dict[str, Any]) -> str:
     L.append(f"- {snap['entry_strategy']}")
     L.append("")
 
-    L.append("## 4. Entry zones")
+    L.append("## 4. Entry zones (R:R + position sizing)")
     L.append("")
     if not snap["entry_zones"]:
         L.append("- _no zones derivable from indicators_")
     else:
+        L.append("| Zone | Range | Entry ref | Target | R:R | Size %NAV | Notional / 100m NAV | Note |")
+        L.append("|---|---|---|---|---|---|---|---|")
         for z in snap["entry_zones"]:
             if "lower" in z and "upper" in z:
-                L.append(
-                    f"- **{z['name']}**: {_fmt_num(z['lower'])} – {_fmt_num(z['upper'])}"
-                    f" ({z.get('rationale','')})"
-                )
+                rng = f"{_fmt_num(z['lower'])} – {_fmt_num(z['upper'])}"
+            elif "level" in z:
+                rng = f"{_fmt_num(z['level'])}"
             else:
-                L.append(
-                    f"- **{z['name']}**: {_fmt_num(z.get('level'))}"
-                    f" ({z.get('rationale','')})"
-                )
+                rng = "—"
+            entry_ref = _fmt_num(z.get("entry_ref"))
+            target_ref = _fmt_num(z.get("target_ref"))
+            rr = z.get("risk_reward")
+            rr_str = f"{rr:.2f}" if isinstance(rr, (int, float)) else "—"
+            size_pct = z.get("size_pct_nav")
+            size_str = f"{size_pct:.2f}%" if isinstance(size_pct, (int, float)) else "—"
+            notional = z.get("notional_per_100m_nav")
+            notional_str = f"{int(notional):,}" if isinstance(notional, (int, float)) else "—"
+            note_bits = []
+            if z.get("rr_invalid_reason") == "entry_below_or_at_primary_stop":
+                note_bits.append("entry < stop ⚠️ (stop bị thiết kế gần hơn entry — không thực thi)")
+            elif z.get("rr_invalid_reason") == "entry_above_or_at_target":
+                note_bits.append("entry > target ⚠️ (target gần hơn entry — chờ target xa hơn)")
+            elif z.get("low_rr_warning"):
+                note_bits.append("R:R < 1.5 ⚠️")
+            if z.get("rationale"):
+                note_bits.append(z["rationale"])
+            note_str = " · ".join(note_bits) if note_bits else "—"
+            L.append(
+                f"| {z['name']} | {rng} | {entry_ref} | {target_ref} | {rr_str} | {size_str} | {notional_str} | {note_str} |"
+            )
+    L.append("")
+    L.append(
+        "> Size dựa trên 1% NAV risk/lệnh, cap 20% concentration, "
+        "ATR%-scaled (ATR% > 1.5% giảm size), liquidity floor cắt về 5% nếu turnover < ngưỡng. "
+        "Notional cho NAV 100 triệu VND."
+    )
     L.append("")
 
     L.append("## 5. Support / Resistance")
@@ -946,12 +1754,158 @@ def render_markdown(snap: dict[str, Any]) -> str:
             L.append(f"- {r}")
     L.append("")
 
-    L.append("## 9. Final view")
+    # ---- Market context ----
+    L.append("## 9. Bối cảnh thị trường")
+    L.append("")
+    mc = snap.get("market_context")
+    rs = snap.get("relative_strength")
+    if not mc:
+        L.append("- _missing_data — chưa fetch market_context_{DATE}.json_")
+    else:
+        L.append(f"- VNINDEX regime: **{mc.get('regime','unknown')}**")
+        L.append(
+            f"- VNINDEX close={_fmt_num(mc.get('close'))}, SMA20={_fmt_num(mc.get('sma20'))}, "
+            f"SMA50={_fmt_num(mc.get('sma50'))}, SMA100={_fmt_num(mc.get('sma100'))}"
+        )
+        L.append(
+            f"- ret_1d={_fmt_num(mc.get('ret_1d_pct'))}%, "
+            f"ret_5d={_fmt_num(mc.get('ret_5d_pct'))}%, "
+            f"ret_20d={_fmt_num(mc.get('ret_20d_pct'))}%"
+        )
+        breadth = mc.get("breadth") or {}
+        if breadth and breadth.get("breadth_pct") is not None:
+            L.append(
+                f"- VN30 breadth: **{breadth.get('breadth_pct')}%** "
+                f"({breadth.get('n_above_sma50')}/{breadth.get('n_total')} stocks > SMA50, "
+                f"regime: {breadth.get('regime')})"
+            )
+    if rs:
+        L.append(
+            f"- Relative strength vs VNINDEX: **{rs.get('label')}** "
+            f"(slope 20D = {rs.get('rs_slope_20d_pct')}%)"
+        )
+    L.append("")
+    L.append(f"- weekly_trend: **{snap.get('weekly_trend')}**")
+    L.append(f"- structure_label: **{snap.get('structure_label')}**")
+    L.append("")
+
+    # ---- Next-session playbook ----
+    L.append("## 10. Kế hoạch phiên sau")
+    L.append("")
+    pb = snap.get("next_session_playbook") or {}
+    L.append(f"- **base_bias**: `{pb.get('base_bias','—')}`")
+    L.append(f"- rationale: {pb.get('bias_rationale','—')}")
+    tgt = pb.get("primary_target")
+    if tgt:
+        L.append(
+            f"- primary_target: **{_fmt_num(tgt['level'])}** "
+            f"({tgt.get('name')}, +{tgt.get('dist_pct')}%)"
+        )
+    L.append("")
+
+    monitor = pb.get("monitoring_levels") or {}
+    if monitor:
+        L.append("**Mức theo dõi intraday:**")
+        if "must_hold" in monitor:
+            L.append(f"- must_hold: **{_fmt_num(monitor['must_hold'])}** (thủng → cắt)")
+        if "trigger_add" in monitor:
+            L.append(f"- trigger_add: **{_fmt_num(monitor['trigger_add'])}** (vượt → add)")
+        if "take_profit_1" in monitor:
+            L.append(f"- take_profit_1: {_fmt_num(monitor['take_profit_1'])}")
+        if "take_profit_2" in monitor:
+            L.append(f"- take_profit_2: {_fmt_num(monitor['take_profit_2'])}")
+        L.append("")
+
+    scenarios = pb.get("scenarios") or []
+    if scenarios:
+        L.append("**4 kịch bản mở cửa:**")
+        L.append("")
+        L.append("| Kịch bản | Trigger | Action | Invalidation |")
+        L.append("|---|---|---|---|")
+        for sc in scenarios:
+            L.append(
+                f"| **{sc['name']}** | {sc['trigger']} | {sc['action']} | {sc['invalidation']} |"
+            )
+        L.append("")
+
+    eb = pb.get("empirical_bias")
+    if eb:
+        warn = " ⚠️ low_sample" if eb.get("low_sample_warning") else ""
+        L.append(
+            f"**Historical bias** (state `{eb['state']}`, n={eb['n_samples']}{warn}): "
+            f"P(up 1D)={eb['p_up_1d']}, P(up 5D)={eb['p_up_5d']}, "
+            f"median ret 5D={eb['median_ret_5d_pct']}%, hit +1ATR/5D={eb['hit_target_1atr_5d']}"
+        )
+        L.append("")
+
+    # ---- Macro + foreign + backtest ----
+    macro = snap.get("macro_overlay")
+    if macro and "tickers" in macro:
+        L.append("## 11. Macro overlay")
+        L.append("")
+        L.append("| Ticker | Last | SMA20 | ret_5d% | ret_20d% | trend |")
+        L.append("|---|---|---|---|---|---|")
+        for name, info in macro["tickers"].items():
+            if "error" in info:
+                L.append(f"| {name} | _err: {info['error']}_ | — | — | — | — |")
+                continue
+            L.append(
+                f"| {name} ({info.get('ticker')}) | {info.get('last_close')} | {info.get('sma20')} | "
+                f"{info.get('ret_5d_pct')} | {info.get('ret_20d_pct')} | {info.get('trend')} |"
+            )
+        narr = macro.get("narrative", {})
+        if narr:
+            L.append("")
+            L.append(
+                f"- oil_regime: **{narr.get('oil_regime')}**, "
+                f"usdvnd_regime: **{narr.get('usdvnd_regime')}**, "
+                f"fx_pressure: **{narr.get('fx_pressure')}**"
+            )
+        L.append("")
+
+    fg = snap.get("foreign_snapshot")
+    if fg and "error" not in fg:
+        L.append("## 12. Foreign flow (snapshot)")
+        L.append("")
+        L.append(
+            f"- foreign_buy={fg.get('foreign_buy_volume'):,.0f}, "
+            f"foreign_sell={fg.get('foreign_sell_volume'):,.0f}, "
+            f"net={fg.get('net_foreign_volume'):,.0f}"
+        )
+        L.append(
+            f"- share_of_total_volume: {fg.get('foreign_share_of_volume_pct')}%, "
+            f"bias: **{fg.get('bias')}**"
+        )
+        L.append("")
+
+    bt = snap.get("backtest_summary")
+    if bt and bt.get("by_state"):
+        L.append("## 13. Backtest snapshot")
+        L.append("")
+        overall = bt.get("overall") or {}
+        if overall:
+            L.append(
+                f"- overall: n_trades={overall.get('n', overall.get('n_trades'))}, "
+                f"hit_rate={overall.get('hit_rate')}, "
+                f"avg_R={overall.get('avg_r')}, "
+                f"max_dd_pct={overall.get('max_dd_pct')}"
+            )
+        st_row = bt["by_state"].get(snap["technical_state"])
+        if st_row:
+            L.append(
+                f"- this state (`{snap['technical_state']}`): n={st_row.get('n')}, "
+                f"hit_rate={st_row.get('hit_rate')}, avg_R={st_row.get('avg_r')}, "
+                f"median_ret_pct={st_row.get('median_ret_pct')}"
+            )
+        L.append("")
+
+    L.append("## 14. Final view")
     L.append("")
     L.append(snap["final_view"])
     L.append("")
     L.append(
-        "> Báo cáo thuần kỹ thuật. Không phải khuyến nghị mua/bán. "
+        f"> pipeline_version: `{snap.get('pipeline_version','—')}` · "
+        "Báo cáo thuần kỹ thuật. Không phải khuyến nghị mua/bán. "
         "Dùng kèm phân tích nền tảng và bối cảnh thị trường."
     )
     return "\n".join(L) + "\n"

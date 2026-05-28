@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Price data quality audit for Vietnamese equities (vnstock-backed).
 
-Fetches daily OHLCV from multiple sources (VCI primary, TCBS attempted),
-pulls corporate-action events (dividends / stock bonus / split), detects
-whether the returned price series is raw or adjusted by comparing actual
-price drops on ex-rights dates against expected drops from declared
-dividend value, then recomputes SMA20/50/100/200 on the appropriate
-column and audits unexpected gaps.
+Fetches daily OHLCV from multiple sources (VCI primary, MSN + KBS as
+cross-check), pulls corporate-action events, detects whether each source
+returns raw or adjusted prices by comparing actual ex-rights drops to
+declared dividend value, and confirms adjustment status when 2+ sources
+agree.
 
 Outputs
 -------
-- data/{SYMBOL}_price_VCI.csv
-- data/{SYMBOL}_price_TCBS.csv    (only if successfully fetched)
-- data/{SYMBOL}_corporate_actions.csv  (only if successfully fetched)
+- data/{SYMBOL}_price_{SOURCE}.csv per successful source
+- data/{SYMBOL}_corporate_actions.csv
 - reports/{SYMBOL}_data_quality_report.md
 
 Usage
@@ -590,6 +588,31 @@ def run(symbol: str, start: str, end: str, sources: list[str]) -> Path:
         df = fetches[chosen_source].df
         adj_verdict = detect_adjusted_price(df, corp_df)
 
+        # Cross-source consensus: run detection on every successful source
+        # and upgrade confidence when 2+ sources agree on the same status.
+        per_source_status: dict[str, str] = {}
+        for src, fr in fetches.items():
+            if not fr.ok:
+                continue
+            try:
+                v = detect_adjusted_price(fr.df, corp_df)
+            except Exception:
+                continue
+            per_source_status[src] = v.status
+
+        confirmed_statuses = [s for s in per_source_status.values() if s in ("raw", "adjusted")]
+        if confirmed_statuses:
+            from collections import Counter
+            counts = Counter(confirmed_statuses)
+            top_status, top_count = counts.most_common(1)[0]
+            if top_count >= 2:
+                adj_verdict.status = top_status
+                adj_verdict.confidence = "high"
+                adj_verdict.notes.append(
+                    f"cross_source_consensus: {top_count}/{len(per_source_status)} sources agree "
+                    f"({', '.join(f'{s}={st}' for s, st in per_source_status.items())})"
+                )
+
         # Decide which column to compute MAs on.
         # Per spec: don't use close for SMA100/200 if adjusted status unknown.
         # Implementation choice: always compute on 'close', but encode the
@@ -626,10 +649,10 @@ def main():
     p.add_argument(
         "--sources",
         nargs="+",
-        default=["VCI", "TCBS"],
-        help="Sources to attempt, in priority order. vnstock 4.0.x supports VCI; "
-             "TCBS is attempted for parity with the spec and reported as "
-             "missing_data if unavailable.",
+        default=["VCI", "MSN", "KBS", "DNSE"],
+        help="Sources to attempt, in priority order. vnstock 4.0.x whitelist: "
+             "vci/msn/kbs/dnse/fmp/binance/fmarket. 2+ sources agreeing on "
+             "raw/adjusted upgrades long_ma_confidence to high.",
     )
     args = p.parse_args()
     run(args.symbol.upper(), args.start, args.end, [s.upper() for s in args.sources])

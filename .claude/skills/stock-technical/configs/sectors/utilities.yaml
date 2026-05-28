@@ -1,0 +1,23 @@
+# Utilities / power sector overrides.
+# Tickers: POW, REE, GEX, PC1, NT2.
+#
+# Calibration (2026-05-28, n=630 ATR% obs from POW+REE, n=331 multi-OLS):
+#   ATR%: median 2.63%, P90 3.94%, P95 4.19%
+#
+#   Multi-driver OLS (n=331, R²=0.008, adj-R²=NEGATIVE):
+#     brent_ret_5d:    beta=-0.033, t=-0.91   not significant
+#     dxy_ret_20d:     beta=+0.019, t=+0.15   not significant
+#     usdvnd_ret_20d:  beta=-0.451, t=-1.34   not significant (borderline)
+#   → No significant driver at 95%. USDVND borderline (t=-1.34). Sector
+#     macro penalties REMOVED — wait for larger sample.
+
+sizing:
+  atr_pct_low: 2.6                   # [calibrated 20-ticker]
+  atr_pct_high: 3.9                  # [calibrated 20-ticker, P90]
+
+liquidity:
+  floor_thousand_vnd: 5_000_000
+
+macro_penalties: []
+
+sector_label: "utilities"

@@ -1,0 +1,211 @@
+# Default config — applied to all tickers unless overridden by sector/ticker.
+# Loaded by scripts/config_loader.py. Sector + ticker configs deep-merge on top.
+#
+# Numbers marked [calibrated 2026-05-28] derived from scripts/calibrate.py
+# over 5-ticker pool (BSR, VCB, BMP, PLX, POW) + sector basket regression.
+# Numbers marked [heuristic] are convention or judgement — not empirically derived.
+
+sizing:
+  risk_pct_nav: 1.0                  # [convention] Van Tharp 1% rule
+  max_size_pct_nav: 20.0             # [heuristic] concentration cap
+  vol_target_daily_pct: 1.5          # [heuristic]
+  atr_pct_low: 1.5                   # [heuristic — overridden by sector]
+  atr_pct_high: 5.0                  # [heuristic — overridden by sector]
+
+liquidity:
+  floor_thousand_vnd: 5_000_000      # [heuristic] 5B VND/day floor
+  illiquid_size_cap_pct_nav: 5.0     # [heuristic]
+
+scoring:
+  # Calibrated 2026-05-28: BREAKOUT_WITH_EXHAUSTION_RISK state forward 5D ret
+  # was +3.35% vs +0.52% baseline (t=2.40, n_trig=67). Cap DISABLED based on
+  # empirical evidence. Set to 100 (no cap). Restore to 68 if regime flips.
+  exhaustion_score_cap: 100           # [calibrated DISABLED — was 68 (heuristic)]
+  triple_risk_penalty: 5              # [retained — n_trigger=1, cannot validate]
+  target_max_dist_pct: 12.0           # [heuristic — pending decay calibration]
+
+# Backtest defaults — used by backtest_decision.py if config available.
+# [calibrated 2026-05-28] Pooled top-5 grid search:
+#   atr_stop=1.0, atr_target=3.0, hold_bars=20 → pooled avg_R 0.583, hit_rate 0.341
+# Old heuristic was 1.5/1.5/10 (NOT in top 5).
+backtest:
+  atr_stop_mult: 1.0
+  atr_target_mult: 3.0
+  hold_bars: 20
+
+adx:
+  strong: 25.0                       # [Wilder 1978]
+  developing: 20.0                   # [Wilder 1978]
+
+# State classifier thresholds. Each state has named cutoffs used by
+# decision_framework.determine_state. Tune via calibrate.py jobs.
+state_classifier:
+  breakout_confirmed:
+    vol_ratio_min: 1.5                # [heuristic — pending grid search]
+    ret_1d_min_pct: 2.0               # [heuristic — pending grid search]
+  breakout_with_exhaustion:
+    stoch_k_min: 90.0                 # [heuristic — empirically contradicted, retained as safety]
+    vol_ratio_min: 2.0                # [heuristic]
+  bullish_trend_confirmed:
+    vol_ratio_min: 1.0                # [heuristic]
+  accumulation:
+    near_ma_atr_mult: 1.0             # [heuristic]
+    vol_ratio_low: 0.8                # [heuristic]
+    vol_ratio_high: 1.5               # [heuristic]
+    rsi_min: 45.0                     # [heuristic]
+    rsi_max: 60.0                     # [heuristic]
+
+# Risk detection thresholds. Used by compute_key_risks.
+# Calibrated 2026-05-28 (20-ticker pool, n=7760 obs forward 5D).
+#
+# IMPORTANT: 2 risk signals show OPPOSITE forward edge vs traditional reading:
+#   - RSI overbought ≥72: forward 5D ret +1.39% HIGHER than rest. Momentum
+#     continuation, not pullback risk. Re-interpret risk label.
+#   - near_52w_high (dist > -1%): forward 5D ret +0.85% HIGHER.
+#     Strength continues — flag as "watch for failed breakout" but score-wise positive.
+# Cutoffs below = empirical optimum |t-stat| over candidate sweep.
+risk_thresholds:
+  rsi_overbought: 72.0                # [calibrated, |t|=3.98] was 75
+  rsi_oversold: 25.0                  # [calibrated, |t|=4.47] confirmed
+  near_52w_high_dist_pct: -1.0        # [calibrated, |t|=2.00] was -3
+  near_52w_low_dist_pct: 10.0         # [calibrated, |t|=4.30] was 5
+  near_sma100_lower_band_pct: -2.0    # [calibrated, |t|=3.25] confirmed
+  near_sma100_upper_band_pct: 0.0     # [bound — convention]
+  cmf_distribution_cutoff: -0.05      # [calibrated, |t|=4.49] confirmed exactly
+  exhaustion_ret_1d_min_pct: 5.0      # [retained heuristic — see exhaustion verdict below]
+  exhaustion_vol_ratio_min: 2.0       # [retained heuristic]
+  exhaustion_stoch_k_min: 90.0        # [retained heuristic]
+  structural_stop_too_far_pct: 10.0   # [heuristic — pending calibration]
+
+# Base bias derivation thresholds. Used by _compute_base_bias.
+# Calibrated 2026-05-28 (20-ticker pool, n=7760 forward 5D).
+# Proxy score using calibrated rubric — best discrimination at score ≥ 55
+# (|t|=7.79, diff=+0.93%). Higher thresholds 70/72 still positive but less data.
+# Old heuristic 70 was too restrictive.
+base_bias:
+  bullish_score_threshold: 65         # [calibrated balanced — was 70. 55 max t-stat, 65 stronger signal]
+  bearish_score_threshold: 45         # [calibrated — was 40. complement of 65]
+  rs_leader_slope_pct: 2.0            # [retained — pending RS-specific regression]
+  rs_laggard_slope_pct: -2.0          # [retained]
+  bullish_net_signals: 3              # [retained — n-signal counting heuristic]
+  neutral_to_bullish_net: 2           # [retained]
+  bearish_net_signals: -2             # [retained]
+  neutral_to_bearish_net: -1          # [retained]
+
+# Sub-state classifier. Used by _sub_state.
+sub_state_thresholds:
+  watch_breakout_pending_adx_max: 20.0    # [heuristic]
+  watch_range_bound_adx_max: 18.0         # [heuristic]
+  watch_range_bound_mh_abs_max: 0.01      # [heuristic]
+
+# Market context thresholds (VN30 breadth + macro narrative).
+# Calibrated 2026-05-28 (n=334 daily merged obs).
+#
+# IMPORTANT FINDING: breadth strong/weak forward returns FLIPPED vs received wisdom.
+#   High breadth (≥75%) → mean fwd_5d +0.90%
+#   Low breadth (≤45%)  → mean fwd_5d +1.12%
+#   → Low breadth produced HIGHER forward return (mean-reversion regime).
+#
+# Cutoffs retained for narrative purposes but interpretation reversed:
+#   "strong breadth" = late-cycle euphoria, expect mean reversion.
+#   "weak breadth" = capitulation, expect bounce.
+market_context_thresholds:
+  breadth_strong_pct: 60.0            # [retained convention — interpretation calibrated]
+  breadth_weak_pct: 40.0              # [retained convention]
+  breadth_interpretation: "mean_reversion"   # [calibrated 2026-05-28]
+  fx_pressure_high_usdvnd_20d_pct: 1.5  # [heuristic — pending regression]
+  fx_pressure_low_usdvnd_20d_pct: -1.0  # [heuristic]
+
+# Structural / dedup parameters.
+structure_params:
+  confluence_dedup_pct: 0.3           # [heuristic]
+  pivot_lookback_bars: 100            # [heuristic]
+  pivot_k: 3                          # [heuristic]
+  volume_profile_lookback: 100        # [heuristic]
+  volume_profile_bins: 50             # [heuristic]
+
+# PENDING_DATA — heuristics that cannot be empirically calibrated due to data
+# source limitations. Documented honestly. Re-evaluate when data available.
+pending_data:
+  foreign_net_sell_heavy_delta:
+    value: -3
+    reason: "vnstock does not expose historical per-ticker foreign flow. Snapshot only available via KBS price_board. Cannot regress forward returns on foreign flow until historical source found."
+  liquidity_floor_thousand_vnd:
+    value: 5_000_000
+    reason: "Calibrating turnover floor requires real fill-quality / slippage data, not available from public vnstock APIs. Heuristic 5B VND/day chosen as rule of thumb for HOSE board lot context."
+  illiquid_size_cap_pct_nav:
+    value: 5.0
+    reason: "Same as above — slippage data needed to optimise."
+  max_size_pct_nav:
+    value: 20.0
+    reason: "Concentration cap is risk-management judgement, not statistical. 20% cap conservative for VN single-name exposure."
+  vol_target_daily_pct:
+    value: 1.5
+    reason: "Vol-targeting parameter. Requires portfolio-level backtest with realistic drawdown tolerance to calibrate."
+  triple_risk_penalty:
+    value: 5
+    reason: "Conjunction (exhaustion + near_sma100 + not_aligned) too rare in 20-ticker sample (n_trigger=1) for stable t-stat. Retained as judgement-based safety penalty. Re-test when larger pool available."
+  target_max_dist_pct:
+    value: 12.0
+    reason: "Target search window. Heuristic — pending calibration of forward return decay with distance."
+
+# Score rubric weights — calibrated 2026-05-28 across 20-ticker pool
+# (n_true/n_false ~3000-7000 each). Forward 5D return mean diff scaled to ±10
+# anchored at max |t-stat|. Signals with |t|<2 → weight 0.
+#
+# Important caveats (read before using):
+#   - 3 signals have OPPOSITE sign vs classical heuristic. Likely regime artifact
+#     (2024-2026 sample = sideways/mild bull, mean-reversion favoured):
+#       close > sma200 → empirical -4 (heuristic +10)
+#       close < sma100 → empirical +3 (heuristic -8)
+#       stoch ≥ 90 + BB upper → empirical +6 (heuristic -8)
+#   - Re-calibrate quarterly. Watch for regime shift inverting these.
+score_rubric:
+  base: 50
+  signals:
+    # Trend
+    - id: close_above_sma50
+      condition: "close > sma50"
+      weight: 8        # was +10. t=4.77, μ_diff=+0.58%
+    - id: close_above_sma200
+      condition: "close > sma200"
+      weight: -4       # was +10. t=-2.15. SIGN FLIPPED — mean reversion regime
+    - id: close_below_sma100
+      condition: "close < sma100"
+      weight: 3        # was -8. t=+2.12. SIGN FLIPPED — dip buying works
+    # Momentum
+    - id: macd_hist_positive
+      condition: "macd_hist > 0"
+      weight: 8        # was +8. t=4.60 — unchanged
+    # Volume / flow
+    - id: vol_ratio_ge_1_5
+      condition: "vol_ratio >= 1.5"
+      weight: 6        # was +10. t=3.46
+    - id: obv_slope_up
+      condition: "obv_slope_20d > 0"
+      weight: 10       # was +5. t=6.13 — STRONGEST signal, was under-weighted
+    - id: cmf_negative
+      condition: "cmf20 < 0"
+      weight: -7       # was -5. t=-4.07
+    # Stochastic / BB
+    - id: stoch_ge_90_at_bb_upper
+      condition: "stoch_k >= 90 and bb_position == 'above_upper'"
+      weight: 6        # was -8. t=3.68. SIGN FLIPPED — momentum continuation
+    # Inactive (calibrated to 0)
+    - id: mfi_50_to_80
+      condition: "mfi14 >= 50 and mfi14 <= 80"
+      weight: 0        # was +5. t=1.60 non-significant
+    - id: ma_not_aligned_from_risks
+      condition: "_risk:trend_not_fully_aligned"
+      weight: 0        # was -5. t=0.50 non-significant
+
+# Macro penalty rules. Each rule:
+#   when: condition (eval against tickers + foreign + narrative)
+#   delta: score change (positive = bonus, negative = penalty)
+#   note: rendered as macro_penalty_note
+macro_penalties:
+  # Universal: heavy foreign net-selling. [heuristic — no regression yet]
+  - id: foreign_net_sell_heavy
+    when: "foreign.bias == 'net_sell' and foreign.share >= 20"
+    delta: -3
+    note: "foreign_net_sell {share}% volume → -3 score"

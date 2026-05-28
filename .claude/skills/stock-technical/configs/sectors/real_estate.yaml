@@ -1,0 +1,32 @@
+# Real estate sector overrides.
+# Tickers: VHM, VIC, VRE, NVL, DXG, KDH, PDR, DIG, NLG.
+#
+# Calibration (2026-05-28, n=760 ATR% obs from VHM+VIC, n=331 multi-OLS):
+#   ATR%: median 4.10%, P90 5.74%, P95 6.36%
+#   (highest vol among traditional sectors — leverage + liquidity sensitive.)
+#
+#   Multi-driver OLS (n=331, R²=0.0303, adj-R²=0.0214):
+#     brent_ret_5d:    beta=-0.065, t=-1.50   not significant
+#     dxy_ret_20d:     beta=-0.347, t=-2.28 ✓ SIGNIFICANT (only one)
+#     usdvnd_ret_20d:  beta=+0.319, t=+0.79   not significant
+#   → DXY is the only significant driver. Score delta calibrated:
+#     DXY +2%/20D → predicted -0.69%/5D = -0.16σ → -1 score (small but real)
+
+sizing:
+  atr_pct_low: 4.1                   # [calibrated 20-ticker]
+  atr_pct_high: 5.7                  # [calibrated 20-ticker, P90]
+
+liquidity:
+  floor_thousand_vnd: 5_000_000
+
+macro_penalties:
+  - id: re_dxy_pressure
+    when: "dxy.ret_20d_pct is not None and dxy.ret_20d_pct >= 2"
+    delta: -1
+    note: "[calibrated multi-OLS] real_estate + DXY ret_20d {dxy.ret_20d_pct}% ≥ +2% → -1 score (t=-2.28, beta -0.347)"
+  - id: re_dxy_ease
+    when: "dxy.ret_20d_pct is not None and dxy.ret_20d_pct <= -2"
+    delta: 1
+    note: "[calibrated multi-OLS] real_estate + DXY ret_20d {dxy.ret_20d_pct}% ≤ -2% → +1 score"
+
+sector_label: "real_estate"

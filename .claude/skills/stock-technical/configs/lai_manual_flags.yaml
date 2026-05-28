@@ -1,0 +1,22 @@
+# Manual lái flags (Layer 7 symptoms 3 + 5).
+# 3 = prop trade active (user reads CafeF/SSI broker report)
+# 5 = ATC manipulation (user observes intraday)
+#
+# Stale > 30 days → auto-only assessment (manual symptoms 3+5 ignored).
+
+last_updated: 2026-05-29
+
+flags_by_ticker: {}
+# Example shape:
+# flags_by_ticker:
+#   ABC:
+#     - symptom_id: 3_prop_trade_active
+#       flagged_at: 2026-05-29
+#       expires_at: 2026-06-29
+#       evidence: "SSI broker report Q2 2026 prop sequence buy"
+#       severity: high
+#     - symptom_id: 5_atc_manipulation
+#       flagged_at: 2026-05-29
+#       expires_at: 2026-06-12
+#       evidence: "intraday observation 14:30-14:45 large ATC orders"
+#       severity: medium

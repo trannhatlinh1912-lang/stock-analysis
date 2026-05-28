@@ -165,6 +165,159 @@ def _cmf(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, n
     return mfv.rolling(n, min_periods=n).sum() / volume.rolling(n, min_periods=n).sum()
 
 
+def _adx_dmi(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14):
+    """Wilder's ADX + +DI / -DI (14)."""
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=high.index)
+    tr = _true_range(high, low, close)
+    atr_n = tr.ewm(alpha=1.0 / n, adjust=False, min_periods=n).mean()
+    plus_di = 100.0 * plus_dm.ewm(alpha=1.0 / n, adjust=False, min_periods=n).mean() / atr_n.replace(0.0, np.nan)
+    minus_di = 100.0 * minus_dm.ewm(alpha=1.0 / n, adjust=False, min_periods=n).mean() / atr_n.replace(0.0, np.nan)
+    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0.0, np.nan)
+    adx = dx.ewm(alpha=1.0 / n, adjust=False, min_periods=n).mean()
+    return adx, plus_di, minus_di
+
+
+def _ichimoku(high: pd.Series, low: pd.Series, close: pd.Series,
+              tenkan_n: int = 9, kijun_n: int = 26, senkou_b_n: int = 52, displacement: int = 26):
+    """Ichimoku Kinko Hyo. Returns (tenkan, kijun, senkou_a_shifted, senkou_b_shifted, chikou)."""
+    tenkan = (high.rolling(tenkan_n, min_periods=tenkan_n).max()
+              + low.rolling(tenkan_n, min_periods=tenkan_n).min()) / 2.0
+    kijun = (high.rolling(kijun_n, min_periods=kijun_n).max()
+             + low.rolling(kijun_n, min_periods=kijun_n).min()) / 2.0
+    senkou_a = ((tenkan + kijun) / 2.0).shift(displacement)
+    senkou_b_raw = (high.rolling(senkou_b_n, min_periods=senkou_b_n).max()
+                    + low.rolling(senkou_b_n, min_periods=senkou_b_n).min()) / 2.0
+    senkou_b = senkou_b_raw.shift(displacement)
+    chikou = close.shift(-displacement)
+    return tenkan, kijun, senkou_a, senkou_b, chikou
+
+
+def _vwap_daily(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, n: int = 20) -> pd.Series:
+    """Rolling N-day VWAP (proxy for intraday VWAP at daily resolution)."""
+    tp = (high + low + close) / 3.0
+    pv = tp * volume
+    return pv.rolling(n, min_periods=n).sum() / volume.rolling(n, min_periods=n).sum()
+
+
+def _vwap_anchored(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, anchor_idx: int) -> pd.Series:
+    """VWAP anchored at anchor_idx running forward to end of series."""
+    tp = (high + low + close) / 3.0
+    pv = tp * volume
+    cum_pv = pv.copy()
+    cum_v = volume.copy()
+    cum_pv.iloc[:anchor_idx] = np.nan
+    cum_v.iloc[:anchor_idx] = np.nan
+    cum_pv = cum_pv.cumsum()
+    cum_v = cum_v.cumsum()
+    return cum_pv / cum_v.replace(0.0, np.nan)
+
+
+def _keltner(close: pd.Series, atr: pd.Series, n: int = 20, mult: float = 2.0):
+    """Keltner Channels: EMA(close, n) ± mult × ATR."""
+    mid = _ema(close, n)
+    upper = mid + mult * atr
+    lower = mid - mult * atr
+    return lower, mid, upper
+
+
+# ---------------------------------------------------------------------------
+# Weekly resample + multi-timeframe filter
+# ---------------------------------------------------------------------------
+
+
+def _compute_weekly(df: pd.DataFrame) -> pd.DataFrame:
+    """Resample daily OHLCV to weekly (W-FRI). Return weekly indicator frame
+    indexed by week-end with columns w_close, w_sma10, w_sma20, w_rsi14,
+    w_macd_hist, weekly_trend (up/down/flat)."""
+    d = df.set_index("date")[["open", "high", "low", "close", "volume"]].copy()
+    w = d.resample("W-FRI").agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+    ).dropna(subset=["close"])
+    if len(w) == 0:
+        return pd.DataFrame(columns=["w_close", "w_sma10", "w_sma20", "w_rsi14", "w_macd_hist", "weekly_trend"])
+    w["w_close"] = w["close"]
+    w["w_sma10"] = w["close"].rolling(10, min_periods=10).mean()
+    w["w_sma20"] = w["close"].rolling(20, min_periods=20).mean()
+    w["w_rsi14"] = _rsi(w["close"], 14)
+    _, _, w_macd_hist = _macd(w["close"])
+    w["w_macd_hist"] = w_macd_hist
+
+    def _wtrend(r):
+        if pd.isna(r["w_sma10"]) or pd.isna(r["w_sma20"]):
+            return "flat"
+        if r["w_close"] > r["w_sma10"] > r["w_sma20"]:
+            return "up"
+        if r["w_close"] < r["w_sma10"] < r["w_sma20"]:
+            return "down"
+        return "flat"
+
+    w["weekly_trend"] = w.apply(_wtrend, axis=1)
+    return w[["w_close", "w_sma10", "w_sma20", "w_rsi14", "w_macd_hist", "weekly_trend"]]
+
+
+# ---------------------------------------------------------------------------
+# Pivot-based structure (HH/HL/LH/LL)
+# ---------------------------------------------------------------------------
+
+
+def _detect_structure(
+    df: pd.DataFrame, lookback: int = 100, k: int = 3
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Classify market structure per row using fractal-style pivots.
+
+    Returns
+    -------
+    structure_label : 'uptrend_structure' | 'downtrend_structure' | 'coiling' | 'volatile' | 'unknown'
+    breakout_structural : bool — close above prior swing_high_20 with vol ≥ 1.5× MA20
+    breakdown_structural : bool — close below prior swing_low_20 with vol ≥ 1.5× MA20
+    """
+    highs = df["high"].values
+    lows = df["low"].values
+    n = len(df)
+
+    pivot_high_idx: list[int] = []
+    pivot_low_idx: list[int] = []
+    for i in range(k, n - k):
+        h_win = highs[i - k:i + k + 1]
+        l_win = lows[i - k:i + k + 1]
+        if highs[i] == h_win.max() and (h_win == highs[i]).sum() == 1:
+            pivot_high_idx.append(i)
+        if lows[i] == l_win.min() and (l_win == lows[i]).sum() == 1:
+            pivot_low_idx.append(i)
+
+    labels: list[str] = []
+    for t in range(n):
+        # Pivots must be confirmed (≥k bars after pivot) and within lookback.
+        ch = [(i, highs[i]) for i in pivot_high_idx if i <= t - k and i >= t - lookback]
+        cl = [(i, lows[i]) for i in pivot_low_idx if i <= t - k and i >= t - lookback]
+        if len(ch) < 2 or len(cl) < 2:
+            labels.append("unknown")
+            continue
+        h2 = ch[-2:]
+        l2 = cl[-2:]
+        hh = h2[1][1] > h2[0][1]
+        ll = l2[1][1] < l2[0][1]
+        if hh and not ll:
+            labels.append("uptrend_structure")
+        elif not hh and ll:
+            labels.append("downtrend_structure")
+        elif hh and ll:
+            labels.append("volatile")
+        else:
+            labels.append("coiling")
+    label_s = pd.Series(labels, index=df.index)
+
+    prev_sh20 = df["swing_high_20"].shift(1)
+    prev_sl20 = df["swing_low_20"].shift(1)
+    vol_ratio = df["vol_ratio"]
+    breakout = (df["close"] > prev_sh20) & (vol_ratio >= 1.5)
+    breakdown = (df["close"] < prev_sl20) & (vol_ratio >= 1.5)
+    return label_s, breakout.fillna(False), breakdown.fillna(False)
+
+
 # ---------------------------------------------------------------------------
 # Master calculator
 # ---------------------------------------------------------------------------
@@ -276,6 +429,96 @@ def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["pivot_s1"] = 2 * out["pivot"] - prev_h
     out["stop_atr_1_5"] = close - 1.5 * out["atr14"]
     out["stop_atr_2_0"] = close - 2.0 * out["atr14"]
+
+    # ---- ADX / DMI ----
+    adx, plus_di, minus_di = _adx_dmi(high, low, close, 14)
+    out["adx14"] = adx
+    out["plus_di14"] = plus_di
+    out["minus_di14"] = minus_di
+    out["trend_strength"] = np.where(
+        adx >= 25, "strong",
+        np.where(adx >= 20, "developing", "weak_or_range")
+    )
+
+    # ---- Ichimoku ----
+    tenkan, kijun, senkou_a, senkou_b, chikou = _ichimoku(high, low, close)
+    out["ichi_tenkan"] = tenkan
+    out["ichi_kijun"] = kijun
+    out["ichi_senkou_a"] = senkou_a
+    out["ichi_senkou_b"] = senkou_b
+    out["ichi_chikou"] = chikou
+    cloud_top = pd.concat([senkou_a, senkou_b], axis=1).max(axis=1)
+    cloud_bot = pd.concat([senkou_a, senkou_b], axis=1).min(axis=1)
+    out["ichi_cloud_top"] = cloud_top
+    out["ichi_cloud_bot"] = cloud_bot
+
+    def _ichi_pos(row):
+        c, t, b = row["close"], row["ichi_cloud_top"], row["ichi_cloud_bot"]
+        if any(pd.isna(v) for v in (c, t, b)):
+            return "unknown"
+        if c > t:
+            return "above_cloud"
+        if c < b:
+            return "below_cloud"
+        return "in_cloud"
+    out["ichi_cloud_position"] = out.apply(_ichi_pos, axis=1)
+
+    # ---- VWAP ----
+    out["vwap20"] = _vwap_daily(high, low, close, vol, 20)
+    out["vwap50"] = _vwap_daily(high, low, close, vol, 50)
+    # Anchored from last 20D swing low index (per-row not feasible; anchor at most recent swing_low_20 occurrence)
+    sl20 = out["swing_low_20"].values
+    low_v = low.values
+    anchor = 0
+    for i in range(len(out) - 1, -1, -1):
+        if not pd.isna(sl20[i]) and low_v[i] == sl20[i]:
+            anchor = i
+            break
+    out["vwap_anchored_swing_low"] = _vwap_anchored(high, low, close, vol, anchor)
+    out["vwap_anchor_idx"] = anchor
+
+    # ---- Keltner Channels ----
+    k_low, k_mid, k_up = _keltner(close, out["atr14"], 20, 2.0)
+    out["keltner_lower"] = k_low
+    out["keltner_mid"] = k_mid
+    out["keltner_upper"] = k_up
+
+    # ---- Volume Profile (50-bin POC over rolling 100 sessions) ----
+    def _rolling_poc(window_idx_end: int, lookback: int = 100, bins: int = 50) -> float:
+        start = max(0, window_idx_end - lookback + 1)
+        sub_close = close.iloc[start:window_idx_end + 1].values
+        sub_vol = vol.iloc[start:window_idx_end + 1].values
+        if len(sub_close) < 20 or sub_vol.sum() <= 0:
+            return np.nan
+        hist, edges = np.histogram(sub_close, bins=bins, weights=sub_vol)
+        peak = int(np.argmax(hist))
+        return float((edges[peak] + edges[peak + 1]) / 2.0)
+
+    out["volume_poc_100"] = [_rolling_poc(i, 100, 50) for i in range(len(out))]
+
+    # ---- Liquidity ----
+    out["turnover_20d_avg"] = (close * vol).rolling(20, min_periods=20).mean()
+
+    # ---- Market structure (pivot-based HH/HL/LH/LL) ----
+    struct, bo, bd = _detect_structure(out, lookback=100, k=3)
+    out["structure_label"] = struct
+    out["breakout_structural"] = bo
+    out["breakdown_structural"] = bd
+
+    # ---- Weekly multi-timeframe filter ----
+    weekly = _compute_weekly(out)
+    if len(weekly) > 0:
+        weekly_reset = weekly.reset_index().rename(columns={"date": "week_end"})
+        out = pd.merge_asof(
+            out.sort_values("date"),
+            weekly_reset.sort_values("week_end"),
+            left_on="date",
+            right_on="week_end",
+            direction="backward",
+        )
+    else:
+        for col in ("w_close", "w_sma10", "w_sma20", "w_rsi14", "w_macd_hist", "weekly_trend"):
+            out[col] = np.nan
 
     return out
 
@@ -501,6 +744,22 @@ def generate_indicator_report(df: pd.DataFrame, symbol: str, out_path: Path) -> 
         ("OBV slope 20D", _fmt(last["obv_slope_20d"], 0)),
         ("MFI14", _fmt(last["mfi14"])),
         ("CMF20", _fmt(last["cmf20"], 4)),
+        ("ADX14", _fmt(last.get("adx14"))),
+        ("+DI14", _fmt(last.get("plus_di14"))),
+        ("-DI14", _fmt(last.get("minus_di14"))),
+        ("trend_strength", str(last.get("trend_strength"))),
+        ("Ichimoku Tenkan", _fmt(last.get("ichi_tenkan"))),
+        ("Ichimoku Kijun", _fmt(last.get("ichi_kijun"))),
+        ("Ichimoku Senkou A", _fmt(last.get("ichi_senkou_a"))),
+        ("Ichimoku Senkou B", _fmt(last.get("ichi_senkou_b"))),
+        ("Ichimoku cloud position", str(last.get("ichi_cloud_position"))),
+        ("VWAP20", _fmt(last.get("vwap20"))),
+        ("VWAP50", _fmt(last.get("vwap50"))),
+        ("VWAP anchored (swing_low_20)", _fmt(last.get("vwap_anchored_swing_low"))),
+        ("Keltner upper", _fmt(last.get("keltner_upper"))),
+        ("Keltner lower", _fmt(last.get("keltner_lower"))),
+        ("Volume Profile POC (100D)", _fmt(last.get("volume_poc_100"))),
+        ("Turnover 20D avg", _fmt(last.get("turnover_20d_avg"), 0)),
     ]
     for k, v in rows:
         L.append(f"| {k} | {v} |")

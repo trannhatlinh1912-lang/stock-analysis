@@ -1,0 +1,100 @@
+# Watchlist v3.0 (locked 2026-05-28)
+# 32-ticker pool + SSI/HCM (Securities basket).
+# Classification per Layer 1 results + user judgement.
+
+last_updated: 2026-05-28
+
+# CORE candidates — quality pass, long-horizon thesis eligible
+core:
+  banking:
+    - MBB
+    - VCB
+  oil_gas:
+    - GAS
+    - PLX
+  real_estate:
+    - VHM
+    - NLG
+  steel:
+    - HPG
+    - HSG
+  consumer:
+    - VNM
+    - MWG
+  tech:
+    - FPT
+  securities:
+    - VND
+
+# SWING candidates — quality pass but tactical thesis (cyclical / turnaround / risk)
+swing:
+  cyclical:        # A
+    - BSR
+    - PVD
+    - NKG
+    - SAB
+    - KDH
+  turnaround:      # B
+    - REE
+    - PC1
+    - CMG
+  structural_risk: # C — Swing only, never Core
+    - VIC
+    - DXG
+    - FRT
+    - GEX
+
+# DROP — Layer 1 hard fail or 3+ high warnings
+drop:
+  hard_roe_fail:
+    - TLH
+    - SMC
+  multi_warning:
+    - NVL
+
+# Basket members for Layer 3 sector regime (RS basket)
+sector_baskets:
+  banking:     [VCB, MBB, ACB, CTG, TCB]
+  oil_gas:     [BSR, GAS, PLX, PVS, PVD]
+  real_estate: [VHM, VIC, KDH, NLG, DXG, NVL]
+  steel:       [HPG, HSG, NKG, TLH, SMC]
+  consumer:    [MWG, MSN, VNM, SAB, FRT]
+  tech:        [FPT, REE, GEX, PC1, CMG]
+  securities:  [VND, SSI, HCM]
+
+# Tickers fetched (32 + 2 added 2026-05-28)
+all_fetched:
+  - VCB
+  - MBB
+  - ACB
+  - CTG
+  - TCB
+  - BSR
+  - GAS
+  - PLX
+  - PVS
+  - PVD
+  - VHM
+  - VIC
+  - KDH
+  - NLG
+  - DXG
+  - NVL
+  - HPG
+  - HSG
+  - NKG
+  - TLH
+  - SMC
+  - MWG
+  - MSN
+  - VNM
+  - SAB
+  - FRT
+  - FPT
+  - REE
+  - GEX
+  - PC1
+  - CMG
+  - VND
+  - SSI
+  - HCM

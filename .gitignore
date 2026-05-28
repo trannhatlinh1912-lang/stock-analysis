@@ -1,6 +1,9 @@
 # Generated data snapshots (per-run, contain API responses)
 data/
 
+# Generated reports (regenerated on every run)
+.claude/skills/stock-technical/reports/
+technical_reports/
 
 # Python
 __pycache__/

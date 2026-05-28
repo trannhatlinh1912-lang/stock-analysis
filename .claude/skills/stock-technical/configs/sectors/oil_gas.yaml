@@ -1,0 +1,56 @@
+# Oil & Gas sector overrides (refiner + upstream + distributor).
+# Tickers: BSR, GAS, PLX, PVS, PVD, PVT, OIL.
+#
+# Calibration (2026-05-28, n=1650 ATR% obs, n=331 multi-OLS):
+#   ATR%: median 3.07%, P90 5.82%, P95 7.21%
+#
+#   Univariate OLS (n=348, basket forward 5D ret):
+#     brent_ret_5d:   beta=+0.27, R²=0.075
+#     usdvnd_ret_20d: beta=-2.33, R²=0.061
+#     dxy_ret_20d:    beta=+0.11, R²=0.001  (no signal)
+#
+#   Multi-driver OLS (n=331, R²=0.148, adj-R²=0.140):
+#     brent_ret_5d:    beta=+0.293, t=+5.67 ✓ significant
+#     usdvnd_ret_20d:  beta=-2.50,  t=-5.23 ✓ significant
+#     dxy_ret_20d:     beta=-0.20,  t=-1.11   not significant
+#
+#   → Score deltas calibrated against basket 5D std (5.6%) at threshold move:
+#     Brent -5%/5D: predicted -1.47%/5D = -0.26σ → -1 score
+#     Brent -10%/5D: -2.93%/5D = -0.52σ → -2 score (tail)
+#     USDVND +1.5%/20D: -3.75% basket = -0.67σ → -2 score
+
+sizing:
+  atr_pct_low: 3.0                   # [calibrated 20-ticker]
+  atr_pct_high: 5.8                  # [calibrated 20-ticker, P90]
+
+liquidity:
+  floor_thousand_vnd: 8_000_000
+
+macro_penalties:
+  - id: oil_gas_brent_crash
+    when: "brent.ret_5d_pct is not None and brent.ret_5d_pct <= -5"
+    delta: -1
+    note: "[calibrated multi-OLS] oil_gas + brent ret_5d {brent.ret_5d_pct}% ≤ -5% → -1 score (t=+5.67, R² 0.15)"
+  - id: oil_gas_brent_rally
+    when: "brent.ret_5d_pct is not None and brent.ret_5d_pct >= 5"
+    delta: 1
+    note: "[calibrated multi-OLS] oil_gas + brent ret_5d {brent.ret_5d_pct}% ≥ +5% → +1 score"
+  - id: oil_gas_brent_crash_extreme
+    when: "brent.ret_5d_pct is not None and brent.ret_5d_pct <= -10"
+    delta: -1
+    note: "[calibrated tail] brent ret_5d ≤ -10% → extra -1 score (extrapolate beta)"
+  - id: oil_gas_vnd_weakening
+    when: "usdvnd.ret_20d_pct is not None and usdvnd.ret_20d_pct >= 1.5"
+    delta: -2
+    note: "[calibrated multi-OLS] oil_gas + USDVND ret_20d {usdvnd.ret_20d_pct}% ≥ +1.5% → -2 score (t=-5.23, beta -2.50)"
+  - id: oil_gas_vnd_strengthening
+    when: "usdvnd.ret_20d_pct is not None and usdvnd.ret_20d_pct <= -1.5"
+    delta: 2
+    note: "[calibrated multi-OLS] oil_gas + USDVND ret_20d {usdvnd.ret_20d_pct}% ≤ -1.5% → +2 score"
+
+custom_risks:
+  - id: brent_below_sma50
+    when: "brent.last_close is not None and brent.sma50 is not None and brent.last_close < brent.sma50"
+    label: "brent_below_sma50: dầu Brent dưới SMA50 → biên lọc dầu chịu áp lực (multi-OLS confirmed)."
+
+sector_label: "oil_gas"

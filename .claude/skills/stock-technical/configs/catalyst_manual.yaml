@@ -1,0 +1,34 @@
+# Catalyst manual input — user maintains weekly.
+# Used by Layer 5 catalyst_detector.py for categories 5.1 Policy, 5.4 Commodity (override),
+# 5.6 Upgrade, 5.8 Management Operational. Auto categories: 5.2 Earnings, 5.3 Cycle,
+# 5.5 Corp Action (Phase 3 build), 5.7 Flow (after foreign_history.csv built).
+#
+# Stale > 14 days → all manual catalysts tier-downgrade 1 step + flag manual_stale.
+
+last_updated: 2026-05-29
+
+catalysts_by_ticker: {}
+# Example shape:
+# catalysts_by_ticker:
+#   VCB:
+#     - id: rate_cut_q3_2026
+#       category: "5.1_policy"           # 5.1 / 5.4 / 5.6 / 5.8
+#       tier: hard                       # hard | medium | soft | speculative
+#       direction: bullish               # bullish | bearish
+#       description: "SBV signal rate cut Q3 2026"
+#       sources:
+#         - "https://sbv.gov.vn/..."
+#         - "VCBS Banking Outlook 2026 p23"
+#       detected_at: 2026-05-15
+#       expected_play_date: 2026-08-15
+#       expiration_date: 2026-12-31
+#       extension_allowed: true
+#   GAS:
+#     - id: opec_meeting_jun2026
+#       category: "5.3_cycle"
+#       tier: medium
+#       direction: bullish
+#       description: "OPEC+ extend production cut → Brent up"
+#       sources: ["VCBS Energy Note Q2 2026"]
+#       expected_play_date: 2026-07-01
+#       expiration_date: 2026-12-31

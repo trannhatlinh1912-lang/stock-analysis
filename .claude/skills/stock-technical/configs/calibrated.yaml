@@ -1,0 +1,130 @@
+# Auto-generated calibration output
+
+# Generated: 2026-05-28 16:18:15
+# Source: scripts/calibrate.py
+# Apply manually to configs/default.yaml + configs/sectors/*.yaml after review.
+
+backtest_defaults:
+  atr_stop_mult: 1.0
+  atr_target_mult: 3.0
+  hold_bars: 20
+  pooled_avg_r: 0.5724
+  pooled_hit_rate: 0.3663
+  total_trades: 941
+
+sectors:
+  oil_gas:
+    atr_pct_low_recommended: 3.065
+    atr_pct_high_recommended: 5.819
+    n_obs: 1650
+    macro_regression:
+      brent_ret_5d:
+        beta: 0.26988
+        r2: 0.0745
+        n: 348
+        recommended_score_delta: 1
+        threshold_pct: -5.0
+      dxy_ret_20d:
+        beta: 0.11494
+        r2: 0.0011
+        n: 333
+        recommended_score_delta: 0
+        threshold_pct: 2.0
+      usdvnd_ret_20d:
+        beta: -2.33239
+        r2: 0.0611
+        n: 341
+        recommended_score_delta: 2
+        threshold_pct: 1.5
+  banking:
+    atr_pct_low_recommended: 1.927
+    atr_pct_high_recommended: 3.206
+    n_obs: 1650
+    macro_regression:
+      brent_ret_5d:
+        beta: -0.02729
+        r2: 0.0026
+        n: 348
+        recommended_score_delta: 0
+        threshold_pct: -5.0
+      dxy_ret_20d:
+        beta: -0.01823
+        r2: 0.0001
+        n: 333
+        recommended_score_delta: 0
+        threshold_pct: 2.0
+      usdvnd_ret_20d:
+        beta: -0.29207
+        r2: 0.0035
+        n: 341
+        recommended_score_delta: 0
+        threshold_pct: 1.5
+  steel:
+    atr_pct_low_recommended: 2.562
+    atr_pct_high_recommended: 3.546
+    n_obs: 760
+    macro_regression:
+      brent_ret_5d:
+        beta: -0.04992
+        r2: 0.0043
+        n: 348
+        recommended_score_delta: 0
+        threshold_pct: -5.0
+      dxy_ret_20d:
+        beta: 0.04288
+        r2: 0.0003
+        n: 333
+        recommended_score_delta: 0
+        threshold_pct: 2.0
+      usdvnd_ret_20d:
+        beta: -0.31844
+        r2: 0.002
+        n: 341
+        recommended_score_delta: 0
+        threshold_pct: 1.5
+  real_estate:
+    atr_pct_low_recommended: 4.097
+    atr_pct_high_recommended: 5.736
+    n_obs: 760
+    macro_regression:
+      brent_ret_5d:
+        beta: -0.08429
+        r2: 0.0115
+        n: 348
+        recommended_score_delta: 0
+        threshold_pct: -5.0
+      dxy_ret_20d:
+        beta: -0.373
+        r2: 0.0192
+        n: 333
+        recommended_score_delta: 1
+        threshold_pct: 2.0
+      usdvnd_ret_20d:
+        beta: 0.40057
+        r2: 0.003
+        n: 341
+        recommended_score_delta: 0
+        threshold_pct: 1.5
+  utilities:
+    atr_pct_low_recommended: 2.632
+    atr_pct_high_recommended: 3.936
+    n_obs: 630
+    macro_regression:
+      brent_ret_5d:
+        beta: -0.035
+        r2: 0.003
+        n: 348
+        recommended_score_delta: 0
+        threshold_pct: -5.0
+      dxy_ret_20d:
+        beta: 0.00517
+        r2: 0.0
+        n: 333
+        recommended_score_delta: 0
+        threshold_pct: 2.0
+      usdvnd_ret_20d:
+        beta: -0.49424
+        r2: 0.0066
+        n: 341
+        recommended_score_delta: 1
+        threshold_pct: 1.5

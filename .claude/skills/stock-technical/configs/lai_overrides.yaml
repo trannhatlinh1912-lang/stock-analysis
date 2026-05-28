@@ -1,0 +1,14 @@
+# Lái symptom overrides — user can suppress a flag with evidence.
+# Used when auto detection fires but user has confirmed legitimate cause
+# (real M&A announcement, breakout, etc).
+
+last_updated: 2026-05-29
+
+overrides_by_ticker: {}
+# Example:
+# overrides_by_ticker:
+#   ABC:
+#     - symptom_ids: [1, 6]
+#       override_until: 2026-06-15
+#       reason: "M&A announced 2026-05-28, vol spike legitimate"
+#       user_signature: confirmed

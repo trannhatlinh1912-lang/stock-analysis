@@ -1,0 +1,344 @@
+{
+  "as_of": "2026-05-30",
+  "sectors": {
+    "banking": {
+      "sector": "banking",
+      "as_of": "2026-05-30",
+      "regime": "NEUTRAL",
+      "score": 0,
+      "confidence_pct": 75,
+      "ret_20d_pct": 0.717,
+      "basket_members_used": [
+        "VCB",
+        "MBB",
+        "ACB",
+        "CTG",
+        "TCB",
+        "BID"
+      ],
+      "basket_members_skipped": [],
+      "dimensions": {
+        "rs": {
+          "label": "inline",
+          "rs_slope_20d_pct": 0.21,
+          "rs_now": 0.073763
+        },
+        "breadth": {
+          "label": "strong",
+          "pct": 66.67,
+          "n_above": 4,
+          "n_total": 6
+        },
+        "flow": {
+          "label": "data_insufficient",
+          "cum_20d_vnd": null,
+          "n_days": 1
+        },
+        "cycle": {
+          "label": "compressing",
+          "sector_trend_raw": "compressing",
+          "metric": "NIM_proxy_annualized_pct",
+          "source_file": "banking_2026-05-29.json",
+          "n_valid": 5
+        }
+      },
+      "missing_dimensions": [
+        "flow"
+      ],
+      "trading_mode_modifiers": {
+        "swing_pct_mod": 0,
+        "t_plus_allowed": true,
+        "catalyst_required": false
+      }
+    },
+    "oil_gas": {
+      "sector": "oil_gas",
+      "as_of": "2026-05-30",
+      "regime": "NEUTRAL_TO_BULLISH",
+      "score": 2,
+      "confidence_pct": 50,
+      "ret_20d_pct": 13.327,
+      "basket_members_used": [
+        "BSR",
+        "GAS",
+        "PLX",
+        "PVS",
+        "PVD"
+      ],
+      "basket_members_skipped": [],
+      "dimensions": {
+        "rs": {
+          "label": "leader",
+          "rs_slope_20d_pct": 12.756,
+          "rs_now": 0.080465
+        },
+        "breadth": {
+          "label": "strong",
+          "pct": 60.0,
+          "n_above": 3,
+          "n_total": 5
+        },
+        "flow": {
+          "label": "data_insufficient",
+          "cum_20d_vnd": null,
+          "n_days": 1
+        },
+        "cycle": {
+          "label": "missing",
+          "note": "no_cycle_proxy_output"
+        }
+      },
+      "missing_dimensions": [
+        "flow",
+        "cycle"
+      ],
+      "trading_mode_modifiers": {
+        "swing_pct_mod": 1,
+        "t_plus_allowed": true,
+        "catalyst_required": false
+      }
+    },
+    "real_estate": {
+      "sector": "real_estate",
+      "as_of": "2026-05-30",
+      "regime": "NEUTRAL_TO_BEARISH",
+      "score": -1,
+      "confidence_pct": 75,
+      "ret_20d_pct": -2.387,
+      "basket_members_used": [
+        "VHM",
+        "VIC",
+        "KDH",
+        "NLG",
+        "DXG",
+        "NVL"
+      ],
+      "basket_members_skipped": [],
+      "dimensions": {
+        "rs": {
+          "label": "laggard",
+          "rs_slope_20d_pct": -2.879,
+          "rs_now": 0.157269
+        },
+        "breadth": {
+          "label": "weak",
+          "pct": 33.33,
+          "n_above": 2,
+          "n_total": 6
+        },
+        "flow": {
+          "label": "data_insufficient",
+          "cum_20d_vnd": null,
+          "n_days": 1
+        },
+        "cycle": {
+          "label": "expanding",
+          "sector_trend_raw": "improving",
+          "metric": "OCF_4Q_rolling_YoY_pct",
+          "source_file": "real_estate_2026-05-29.json",
+          "n_valid": 6
+        }
+      },
+      "missing_dimensions": [
+        "flow"
+      ],
+      "trading_mode_modifiers": {
+        "swing_pct_mod": -2,
+        "t_plus_allowed": false,
+        "catalyst_required": true
+      }
+    },
+    "steel": {
+      "sector": "steel",
+      "as_of": "2026-05-30",
+      "regime": "BEARISH",
+      "score": -3,
+      "confidence_pct": 75,
+      "ret_20d_pct": -4.706,
+      "basket_members_used": [
+        "HPG",
+        "HSG",
+        "NKG",
+        "TLH",
+        "SMC"
+      ],
+      "basket_members_skipped": [],
+      "dimensions": {
+        "rs": {
+          "label": "laggard",
+          "rs_slope_20d_pct": -5.186,
+          "rs_now": 0.047688
+        },
+        "breadth": {
+          "label": "weak",
+          "pct": 20.0,
+          "n_above": 1,
+          "n_total": 5
+        },
+        "flow": {
+          "label": "data_insufficient",
+          "cum_20d_vnd": null,
+          "n_days": 1
+        },
+        "cycle": {
+          "label": "compressing",
+          "sector_trend_raw": "compressing",
+          "metric": "inventory_turnover_annualized",
+          "source_file": "steel_2026-05-29.json",
+          "n_valid": 5
+        }
+      },
+      "missing_dimensions": [
+        "flow"
+      ],
+      "trading_mode_modifiers": {
+        "swing_pct_mod": -5,
+        "t_plus_allowed": false,
+        "catalyst_required": true
+      }
+    },
+    "consumer": {
+      "sector": "consumer",
+      "as_of": "2026-05-30",
+      "regime": "NEUTRAL_TO_BEARISH",
+      "score": -1,
+      "confidence_pct": 75,
+      "ret_20d_pct": -6.278,
+      "basket_members_used": [
+        "MWG",
+        "MSN",
+        "VNM",
+        "SAB",
+        "FRT"
+      ],
+      "basket_members_skipped": [],
+      "dimensions": {
+        "rs": {
+          "label": "laggard",
+          "rs_slope_20d_pct": -6.751,
+          "rs_now": 0.063728
+        },
+        "breadth": {
+          "label": "weak",
+          "pct": 20.0,
+          "n_above": 1,
+          "n_total": 5
+        },
+        "flow": {
+          "label": "data_insufficient",
+          "cum_20d_vnd": null,
+          "n_days": 1
+        },
+        "cycle": {
+          "label": "expanding",
+          "sector_trend_raw": "accelerating",
+          "metric": "revenue_yoy_pct_quarterly",
+          "source_file": "consumer_2026-05-29.json",
+          "n_valid": 5
+        }
+      },
+      "missing_dimensions": [
+        "flow"
+      ],
+      "trading_mode_modifiers": {
+        "swing_pct_mod": -2,
+        "t_plus_allowed": false,
+        "catalyst_required": true
+      }
+    },
+    "tech": {
+      "sector": "tech",
+      "as_of": "2026-05-30",
+      "regime": "NEUTRAL_TO_BULLISH",
+      "score": 1,
+      "confidence_pct": 75,
+      "ret_20d_pct": 5.418,
+      "basket_members_used": [
+        "FPT",
+        "REE",
+        "GEX",
+        "PC1",
+        "CMG"
+      ],
+      "basket_members_skipped": [],
+      "dimensions": {
+        "rs": {
+          "label": "leader",
+          "rs_slope_20d_pct": 4.886,
+          "rs_now": 0.070882
+        },
+        "breadth": {
+          "label": "weak",
+          "pct": 20.0,
+          "n_above": 1,
+          "n_total": 5
+        },
+        "flow": {
+          "label": "data_insufficient",
+          "cum_20d_vnd": null,
+          "n_days": 1
+        },
+        "cycle": {
+          "label": "expanding",
+          "sector_trend_raw": "accelerating",
+          "metric": "revenue_yoy_pct_quarterly",
+          "source_file": "tech_2026-05-29.json",
+          "n_valid": 5
+        }
+      },
+      "missing_dimensions": [
+        "flow"
+      ],
+      "trading_mode_modifiers": {
+        "swing_pct_mod": 1,
+        "t_plus_allowed": true,
+        "catalyst_required": false
+      }
+    },
+    "securities": {
+      "sector": "securities",
+      "as_of": "2026-05-30",
+      "regime": "NEUTRAL_TO_BULLISH",
+      "score": 2,
+      "confidence_pct": 50,
+      "ret_20d_pct": 2.989,
+      "basket_members_used": [
+        "VND",
+        "SSI",
+        "HCM"
+      ],
+      "basket_members_skipped": [],
+      "dimensions": {
+        "rs": {
+          "label": "leader",
+          "rs_slope_20d_pct": 2.47,
+          "rs_now": 0.064317
+        },
+        "breadth": {
+          "label": "strong",
+          "pct": 66.67,
+          "n_above": 2,
+          "n_total": 3
+        },
+        "flow": {
+          "label": "data_insufficient",
+          "cum_20d_vnd": null,
+          "n_days": 1
+        },
+        "cycle": {
+          "label": "missing",
+          "note": "no_cycle_proxy_output"
+        }
+      },
+      "missing_dimensions": [
+        "flow",
+        "cycle"
+      ],
+      "trading_mode_modifiers": {
+        "swing_pct_mod": 1,
+        "t_plus_allowed": true,
+        "catalyst_required": false
+      }
+    }
+  }
+}

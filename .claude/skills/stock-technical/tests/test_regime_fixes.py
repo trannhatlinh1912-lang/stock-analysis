@@ -193,6 +193,45 @@ class TestSizingCounterTrend(unittest.TestCase):
         self.assertIn("warnings", out)
 
 
+class TestGoldenSnapshot(unittest.TestCase):
+    """Frozen real outputs (2026-05-30, hand-verified after the L2/L3 fixes).
+
+    Guards two directions: (1) the invariant net must accept known-good
+    output (so tightening an invariant can't start rejecting valid data —
+    a false-positive regression); (2) documents the verified reference.
+    """
+
+    GOLDEN = Path(__file__).resolve().parent / "golden"
+
+    def _strict(self, fn, *args):
+        import os
+        prev = os.environ.get("STOCK_STRICT")
+        os.environ["STOCK_STRICT"] = "1"
+        try:
+            fn(*args)  # must NOT raise on known-good data
+        finally:
+            if prev is None:
+                os.environ.pop("STOCK_STRICT", None)
+            else:
+                os.environ["STOCK_STRICT"] = prev
+
+    def test_market_regime_golden_passes_invariants(self):
+        import json
+        d = json.loads((self.GOLDEN / "market_regime.golden.json").read_text())
+        self._strict(check_market_regime, d)
+        # Reference anchors (frozen): the post-fix accurate read.
+        self.assertEqual(d["regime"], "NEUTRAL")
+        self.assertEqual(d["pillars"]["foreign_cum_20d"]["label"], "data_insufficient")
+        self.assertEqual(d["pillars"]["breadth_vn30"]["label"], "strong")
+
+    def test_sector_regime_golden_passes_invariants(self):
+        import json
+        d = json.loads((self.GOLDEN / "sector_regime.golden.json").read_text())
+        for sector, result in d["sectors"].items():
+            with self.subTest(sector=sector):
+                self._strict(check_sector_regime, result)
+
+
 def _market_result(foreign=None, breadth_pct=60.0):
     pillars = {k: {} for k in ("trend_long", "trend_medium", "breadth_vn30",
                                "liquidity", "margin_debt", "foreign_cum_20d", "volatility")}

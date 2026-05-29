@@ -37,6 +37,7 @@ HIST_LOG = DATA / "lai_signal_history.jsonl"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from utils.manual_loader import load_manual  # noqa: E402
+from news_cache import count_substantive as _cached_news_count  # noqa: E402
 
 
 # Symptom thresholds (configurable, not hardcoded magic)
@@ -74,30 +75,12 @@ def _load_indicators_tail(symbol: str, n: int = 30) -> pd.DataFrame | None:
 
 
 def _fetch_news_count_substantive(symbol: str, days: int) -> int | None:
-    """Use vnstock Company.news() within last N days. Returns None on API fail."""
-    try:
-        from vnstock.api.company import Company
-        c = Company(symbol=symbol, source="VCI")
-        news = c.news()
-    except Exception:
-        return None
-    if news is None or len(news) == 0:
-        return 0
-    df = news.copy()
-    df.columns = [c.lower() for c in df.columns]
-    date_col = next((c for c in ["public_date", "date", "release_date"] if c in df.columns), None)
-    if date_col is None:
-        return None
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    cutoff = pd.Timestamp(date.today() - timedelta(days=days))
-    recent = df[df[date_col] >= cutoff]
-    if "title" in recent.columns:
-        substantive = recent[~recent["title"].fillna("").str.lower().str.contains(
-            "|".join(NON_SUBSTANTIVE_NEWS_KEYWORDS), regex=True
-        )]
-    else:
-        substantive = recent
-    return int(len(substantive))
+    """Read substantive news count from data/news_cache/{symbol}.json.
+
+    Cache must be populated by scripts/news_cache.py first. Returns None if
+    cache missing — caller treats as data_quality=unavailable.
+    """
+    return _cached_news_count(symbol, days, NON_SUBSTANTIVE_NEWS_KEYWORDS)
 
 
 def symptom_1_vol_spike_no_news(symbol: str, ind: pd.DataFrame, skip_news: bool = False) -> dict | None:

@@ -222,8 +222,16 @@ def build_plan(quick: bool, force: bool) -> list[dict]:
         "timeout": 60,
     })
     steps.append({
+        "name": "news_cache",
+        "cmd": [py, str(SCRIPTS / "news_cache.py")],
+        "critical": False,
+        "skip_if_fresh": (DATA / "news_cache" / "VCB.json", 1),
+        "timeout": 600,
+    })
+    # L7 now reads news_cache (no --skip-news needed by default)
+    steps.append({
         "name": "lai_detector",
-        "cmd": [py, str(SCRIPTS / "lai_detector.py"), "--skip-news"],
+        "cmd": [py, str(SCRIPTS / "lai_detector.py")],
         "critical": True,
         "skip_if_fresh": None,
         "timeout": 300,

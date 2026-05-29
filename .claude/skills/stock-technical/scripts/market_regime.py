@@ -40,6 +40,7 @@ from market_context import (  # noqa: E402
     compute_vn30_breadth,
 )
 from utils.manual_loader import load_manual  # noqa: E402
+from utils.invariants import check_market_regime  # noqa: E402
 
 
 def _sma(s: pd.Series, n: int) -> pd.Series:
@@ -310,7 +311,7 @@ def compute_market_regime(start: str, end: str, include_breadth: bool = True) ->
     if margin_effect == "nav_cap_capped_neutral":
         nav_cap = min(nav_cap, REGIME_NAV_CAP["NEUTRAL"])
 
-    return {
+    result = {
         "as_of": last["time"].strftime("%Y-%m-%d"),
         "regime": regime,
         "confidence_pct": confidence,
@@ -338,6 +339,8 @@ def compute_market_regime(start: str, end: str, include_breadth: bool = True) ->
             },
         },
     }
+    check_market_regime(result)
+    return result
 
 
 def main():

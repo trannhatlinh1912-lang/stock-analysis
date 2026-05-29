@@ -31,6 +31,7 @@ CONFIGS = ROOT / "configs"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from market_context import _fetch_index, INDEX_SYMBOL  # noqa: E402
+from utils.invariants import check_sector_regime  # noqa: E402
 
 
 def _load_watchlist() -> dict:
@@ -271,7 +272,17 @@ def compute_sector(sector_name: str, basket: list[str], start: str, end: str, vn
             missing_dims.append(k)
     confidence = max(30, 100 - 25 * len(missing_dims))
 
-    return {
+    # Per-member 20d returns for the basket-range invariant (mean must lie
+    # within member returns; violation = misaligned basket like the L3 bug).
+    member_ret_20d = []
+    if not basket_df.empty and len(basket_df) > 21:
+        for col in members_used:
+            if col in basket_df.columns:
+                ser = basket_df[col].dropna()
+                if len(ser) > 21:
+                    member_ret_20d.append((float(ser.iloc[-1]) / float(ser.iloc[-21]) - 1) * 100)
+
+    result = {
         "sector": sector_name,
         "as_of": date.today().isoformat(),
         "regime": state,
@@ -289,6 +300,8 @@ def compute_sector(sector_name: str, basket: list[str], start: str, end: str, vn
         "missing_dimensions": missing_dims,
         "trading_mode_modifiers": MODIFIER[state],
     }
+    check_sector_regime(result, member_ret_20d)
+    return result
 
 
 def main() -> int:

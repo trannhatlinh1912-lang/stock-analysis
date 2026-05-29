@@ -91,12 +91,16 @@ def check_market_regime(result: dict) -> list[str]:
     breadth = pillars.get("breadth_vn30", {})
     _in_range("breadth_pct", breadth.get("value_pct"), 0, 100, out)
 
-    # Foreign data-quality consistency: a directional vote must be backed by
-    # >=20 real days; an abstain must not carry a cumulative.
+    # Foreign data-quality consistency: vote strength must match history depth.
+    #   full ±1 (positive/negative)        → >=20 distinct days
+    #   weak ±0.5 / neutral                → >=5 distinct days
+    #   data_insufficient                  → no cumulative
     fr = pillars.get("foreign_cum_20d", {})
     flabel, ndays = fr.get("label"), fr.get("n_days")
-    if flabel in ("positive", "negative", "neutral") and ndays is not None and ndays < 20:
-        out.append(f"foreign votes '{flabel}' with only n_days={ndays} (<20)")
+    if flabel in ("positive", "negative") and ndays is not None and ndays < 20:
+        out.append(f"foreign full vote '{flabel}' with only n_days={ndays} (<20)")
+    if flabel in ("positive_weak", "negative_weak", "neutral") and ndays is not None and ndays < 5:
+        out.append(f"foreign weak vote '{flabel}' with only n_days={ndays} (<5)")
     if flabel == "data_insufficient" and fr.get("cum_20d_vnd") is not None:
         out.append("foreign data_insufficient but cum_20d_vnd set")
     return _report("market_regime", out)

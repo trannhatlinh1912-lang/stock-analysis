@@ -402,8 +402,17 @@ def _basket_returns(symbols: list[str], horizon_days: int = 5) -> pd.DataFrame |
     if not series:
         return None
     wide = pd.concat(series, axis=1).sort_index()
-    wide["basket_ret"] = wide.mean(axis=1, skipna=True)
-    return wide.reset_index()[["date", "basket_ret"]]
+    # Equal-weight basket return only on dates where ALL members have a return
+    # (inner join). mean(axis=1, skipna=True) averaged a shifting membership on
+    # partially-populated rows (different listing dates / the pct_change NaN
+    # head), feeding a distorted basket into the macro regression — same class
+    # as the L3 _basket_close bug. Align first.
+    aligned = wide.dropna(how="any")
+    if aligned.empty:
+        return None
+    aligned = aligned.copy()
+    aligned["basket_ret"] = aligned.mean(axis=1)
+    return aligned.reset_index()[["date", "basket_ret"]]
 
 
 def calibrate_macro_penalties(sectors: list[str]) -> dict:

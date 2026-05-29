@@ -142,20 +142,30 @@ def _margin_pillar() -> dict:
     return {"label": label, "ratio_pct": ratio, "manual_status": env["status"]}
 
 
+FOREIGN_FULL_DAYS = 20        # full ±1 vote needs this many distinct days
+FOREIGN_WEAK_MIN_DAYS = 5     # weak ±0.5 vote allowed from here
+FOREIGN_SUSTAINED_FRAC = 0.6  # share of days one-sided to call it sustained
+FOREIGN_OUTLIER_MULT = 3.0    # |net| > this × median = likely deal/ETF, discount
+
+
 def _foreign_pillar() -> dict:
     """Market foreign-flow pillar from foreign_history.csv.
 
     foreign_history.csv holds one row per (date, ticker). Aggregate net_vnd by
-    DATE first (sum across tickers = market-wide daily net), then use the last
-    20 DISTINCT trading days. Previously this used tail(20) on raw rows, which
-    grabbed 20 ticker-rows of a single day and mislabelled it as a 20-day
-    cumulative — a thin proxy then voted -1 with full weight.
+    DATE (market-wide daily net), then judge the trailing window. We do NOT
+    ignore selling — we scale the vote by how much we can trust it:
 
-    Data-quality gate (Guardrail 2): foreign only votes (±1) when ≥20 distinct
-    days exist. With less history it returns 'data_insufficient' → 0 weight,
-    so a low-confidence proxy never drives the regime.
+      - >=20 distinct days + one-sided >=60% of days → full vote (±1),
+        case 'informed_sustained_(sell|buy)'.
+      - 5-19 days, or choppy → weak vote (±0.5), case 'partial_or_choppy'.
+      - <5 days → 'data_insufficient' (can't tell a one-off spike from a
+        trend) → 0 weight.
+
+    A single day whose |net| exceeds FOREIGN_OUTLIER_MULT × the median |net| of
+    the window is treated as a likely one-off (block deal / ETF rebalance) and
+    excluded from the cumulative, so a mechanical flow doesn't masquerade as a
+    directional opinion.
     """
-    MIN_DAYS = 20
     p = DATA / "foreign_history.csv"
     if not p.exists():
         return {"label": "missing", "cum_20d_vnd": None}
@@ -168,22 +178,50 @@ def _foreign_pillar() -> dict:
     df["date"] = pd.to_datetime(df["date"])
     daily = df.groupby("date")["net_vnd"].sum().sort_index()
     n_days = int(daily.shape[0])
-    if n_days < MIN_DAYS:
+    if n_days < FOREIGN_WEAK_MIN_DAYS:
         return {
             "label": "data_insufficient",
             "cum_20d_vnd": None,
             "n_days": n_days,
             "data_quality": "low",
-            "note": f"need {MIN_DAYS} distinct days, have {n_days}",
+            "case": "insufficient_history",
+            "note": f"<{FOREIGN_WEAK_MIN_DAYS}d: cannot distinguish spike vs trend",
         }
-    cum = float(daily.tail(MIN_DAYS).sum())
-    if cum > 0:
-        label = "positive"
-    elif cum < 0:
-        label = "negative"
+
+    window = daily.tail(FOREIGN_FULL_DAYS)
+    n_used = int(window.shape[0])
+    absw = window.abs()
+    med = float(absw.median())
+    outliers = absw > (FOREIGN_OUTLIER_MULT * med) if med > 0 else (absw < 0)
+    n_outliers = int(outliers.sum())
+    core = window[~outliers] if n_outliers else window
+    cum = float(core.sum())
+    neg_frac = float((core < 0).mean()) if len(core) else 0.0
+    pos_frac = float((core > 0).mean()) if len(core) else 0.0
+
+    full = n_used >= FOREIGN_FULL_DAYS
+    if cum < 0:
+        sustained = neg_frac >= FOREIGN_SUSTAINED_FRAC
+        label = "negative" if (full and sustained) else "negative_weak"
+        case = "informed_sustained_sell" if (full and sustained) else "partial_or_choppy_sell"
+    elif cum > 0:
+        sustained = pos_frac >= FOREIGN_SUSTAINED_FRAC
+        label = "positive" if (full and sustained) else "positive_weak"
+        case = "informed_sustained_buy" if (full and sustained) else "partial_or_choppy_buy"
     else:
         label = "neutral"
-    return {"label": label, "cum_20d_vnd": cum, "n_days": n_days, "data_quality": "high"}
+        case = "balanced"
+    return {
+        "label": label,
+        "cum_20d_vnd": cum,
+        "n_days": n_days,
+        "n_used": n_used,
+        "neg_frac": round(neg_frac, 2),
+        "pos_frac": round(pos_frac, 2),
+        "outliers_excluded": n_outliers,
+        "data_quality": "high" if full else "partial",
+        "case": case,
+    }
 
 
 PILLAR_SCORE = {
@@ -191,7 +229,9 @@ PILLAR_SCORE = {
     "breadth":      {"strong": 1, "weak": -1, "neutral": 0, "unknown": 0, "missing": 0},
     "liquidity":    {"rising": 1, "falling": -1, "flat": 0, "missing": 0},
     "margin_debt":  {"safe": 1, "stretched": -1, "elevated": 0, "missing": 0},
-    "foreign":      {"positive": 1, "negative": -1, "neutral": 0, "missing": 0, "data_insufficient": 0},
+    "foreign":      {"positive": 1, "positive_weak": 0.5, "neutral": 0,
+                     "negative_weak": -0.5, "negative": -1,
+                     "missing": 0, "data_insufficient": 0},
     "volatility":   {"normal": 0, "elevated": -1, "spike": -2},
 }
 
@@ -315,7 +355,7 @@ def compute_market_regime(start: str, end: str, include_breadth: bool = True) ->
         "as_of": last["time"].strftime("%Y-%m-%d"),
         "regime": regime,
         "confidence_pct": confidence,
-        "score": int(s),
+        "score": round(float(s), 1),
         "trend_long_gate_passed": trend_long_up,
         "ret_20d_pct": round(ret_20d_pct, 3),
         "pillars": {

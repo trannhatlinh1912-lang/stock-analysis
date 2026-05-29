@@ -69,10 +69,20 @@ class TestInvariants(unittest.TestCase):
         )
         self.assertEqual(v, [])
 
-    def test_foreign_vote_without_history_caught(self):
-        # The L2 bug: a directional vote backed by <20 distinct days.
+    def test_foreign_full_vote_without_history_caught(self):
+        # A full ±1 vote must be backed by >=20 distinct days.
         v = check_market_regime(_market_result(foreign={"label": "negative", "n_days": 1}))
-        self.assertTrue(any("foreign votes" in x for x in v))
+        self.assertTrue(any("full vote" in x for x in v))
+
+    def test_foreign_weak_vote_too_thin_caught(self):
+        # A weak ±0.5 vote still needs >=5 days.
+        v = check_market_regime(_market_result(foreign={"label": "negative_weak", "n_days": 2}))
+        self.assertTrue(any("weak vote" in x for x in v))
+
+    def test_foreign_weak_vote_ok_with_enough_days(self):
+        v = check_market_regime(_market_result(
+            foreign={"label": "negative_weak", "n_days": 10, "cum_20d_vnd": -1e7}))
+        self.assertEqual(v, [])
 
     def test_foreign_abstain_ok(self):
         v = check_market_regime(_market_result(
@@ -110,6 +120,42 @@ class TestForeignPillar(unittest.TestCase):
         self.assertEqual(out["label"], "positive")
         self.assertEqual(out["n_days"], 20)
         self.assertGreater(out["cum_20d_vnd"], 0)
+
+
+class TestForeignClassifier(unittest.TestCase):
+    """PR-A: vote scaled by history depth + persistence; outlier days discounted."""
+
+    def _run(self, rows):
+        import market_regime as mr
+        with mock.patch.object(pd, "read_csv", return_value=pd.DataFrame(rows)), \
+             mock.patch("pathlib.Path.exists", return_value=True):
+            return mr._foreign_pillar()
+
+    @staticmethod
+    def _days(n, net, start_month=4):
+        return [{"date": f"2026-{start_month:02d}-{d+1:02d}", "ticker": "VCB",
+                 "net_vnd": net} for d in range(n)]
+
+    def test_under_5_days_insufficient(self):
+        self.assertEqual(self._run(self._days(3, -5e6))["label"], "data_insufficient")
+
+    def test_20d_sustained_sell_full_vote(self):
+        out = self._run(self._days(20, -5e6))
+        self.assertEqual(out["label"], "negative")
+        self.assertEqual(out["case"], "informed_sustained_sell")
+
+    def test_10d_sell_weak_vote(self):
+        self.assertEqual(self._run(self._days(10, -5e6))["label"], "negative_weak")
+
+    def test_single_outlier_day_excluded(self):
+        # 19 mild sell days + 1 huge opposite block deal → deal discounted,
+        # net direction stays sell.
+        rows = self._days(19, -1e6) + [{"date": "2026-04-20", "ticker": "VCB",
+                                         "net_vnd": 500e6}]
+        out = self._run(rows)
+        self.assertEqual(out["outliers_excluded"], 1)
+        self.assertLess(out["cum_20d_vnd"], 0)
+        self.assertEqual(out["label"], "negative")
 
 
 class TestBasketAlignment(unittest.TestCase):

@@ -123,6 +123,36 @@ class TestBasketAlignment(unittest.TestCase):
         self.assertLessEqual(last["basket"], max(last["A"], last["B"]) + 1e-6)
 
 
+class TestCalibrateBasket(unittest.TestCase):
+    """Audit fix: calibrate._basket_returns must inner-join members, not
+    average a shifting membership via mean(skipna=True)."""
+
+    def test_misaligned_members_inner_joined(self):
+        import calibrate as cal
+        # Both members >=50 rows (pass the len gate) but offset windows, so the
+        # union has partial-membership rows the old skipna mean would average.
+        a = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=80, freq="D"),
+                          "close": [100 + i for i in range(80)]})
+        b = pd.DataFrame({"date": pd.date_range("2024-01-21", periods=80, freq="D"),
+                          "close": [200 + i for i in range(80)]})
+
+        def fake_hist(sym, days=540):
+            return {"A": a, "B": b}[sym]
+
+        with mock.patch.object(cal, "fetch_close_history", side_effect=fake_hist):
+            out = cal._basket_returns(["A", "B"], horizon_days=5)
+
+        self.assertIsNotNone(out)
+        # No NaN basket_ret (a partial-membership row would have leaked through).
+        self.assertFalse(out["basket_ret"].isna().any())
+        # Kept dates ⊆ each member's valid (post-pct_change) date set.
+        a_valid = set(a["date"].iloc[5:])
+        b_valid = set(b["date"].iloc[5:])
+        kept = set(out["date"])
+        self.assertTrue(kept)
+        self.assertTrue(kept.issubset(a_valid & b_valid))
+
+
 def _market_result(foreign=None, breadth_pct=60.0):
     pillars = {k: {} for k in ("trend_long", "trend_medium", "breadth_vn30",
                                "liquidity", "margin_debt", "foreign_cum_20d", "volatility")}

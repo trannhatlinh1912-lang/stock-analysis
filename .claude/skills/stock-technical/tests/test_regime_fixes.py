@@ -27,7 +27,22 @@ from utils.invariants import (  # noqa: E402
 
 
 class TestInvariants(unittest.TestCase):
-    """Pure-function invariants — the safety net itself."""
+    """Pure-function invariants — the safety net itself.
+
+    These assert violations are *detected* (returned list non-empty), so they
+    run in non-strict mode even under CI's STOCK_STRICT=1 (strict raises
+    instead of returning). Acceptance of known-good data under strict is
+    covered by TestGoldenSnapshot.
+    """
+
+    def setUp(self):
+        import os
+        self._prev_strict = os.environ.pop("STOCK_STRICT", None)
+
+    def tearDown(self):
+        import os
+        if self._prev_strict is not None:
+            os.environ["STOCK_STRICT"] = self._prev_strict
 
     def test_mean_within_members_ok(self):
         # 143 is a valid mean of these members

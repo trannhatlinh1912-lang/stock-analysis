@@ -75,14 +75,19 @@ def _basket_close(basket: list[str], start: str, end: str) -> tuple[pd.DataFrame
         df = _fetch_ohlc(sym, start, end)
         if df is None or len(df) < 50:
             continue
-        s = df.set_index("time")["close"]
-        # Normalize to first value (so equal-weight by % return)
-        s_norm = s / s.iloc[0] * 100
-        series[sym] = s_norm
+        series[sym] = df.set_index("time")["close"]
         members_used.append(sym)
     if not series:
         return pd.DataFrame(), []
-    combined = pd.DataFrame(series).dropna(how="all")
+    # Align to common trading dates (inner join) BEFORE normalizing. Members
+    # have different history length / stale tails; with dropna(how="all") +
+    # mean(axis=1) a member dropping out of the mean at the tail shifts the
+    # equal-weight index and fabricates a large fake return. Inner-join first,
+    # then normalize each member to its first value in the aligned window.
+    combined = pd.DataFrame(series).dropna(how="any")
+    if combined.empty:
+        return pd.DataFrame(), members_used
+    combined = combined / combined.iloc[0] * 100
     combined["basket"] = combined.mean(axis=1)
     return combined.reset_index(), members_used
 

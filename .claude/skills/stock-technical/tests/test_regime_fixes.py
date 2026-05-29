@@ -238,6 +238,51 @@ class TestSizingCounterTrend(unittest.TestCase):
         self.assertEqual(
             sz.assign_tier("swing", None, False, True, "green"), 4)
 
+    def test_tier8_requires_hard_catalyst(self):
+        import sizing_calculator as sz
+        # Medium catalyst no longer qualifies for a counter-trend entry.
+        self.assertIsNone(
+            sz.assign_tier("swing", "medium", valuation_pass=True,
+                           technical_pass=False, lai_level="green"))
+        self.assertEqual(
+            sz.assign_tier("swing", "hard", True, False, "green"), 8)
+
+    def test_counter_trend_gate_panic_allowed(self):
+        import sizing_calculator as sz
+        ok, reasons = sz.counter_trend_gate(
+            market_regime="NEUTRAL", rs_label="leader", lai_level="green",
+            foreign_case="partial_or_choppy_sell")
+        self.assertTrue(ok, reasons)
+
+    def test_counter_trend_gate_blocks_laggard(self):
+        import sizing_calculator as sz
+        ok, reasons = sz.counter_trend_gate("NEUTRAL", "laggard", "green", None)
+        self.assertFalse(ok)
+        self.assertTrue(any("laggard" in r for r in reasons))
+
+    def test_counter_trend_gate_blocks_bearish_market(self):
+        import sizing_calculator as sz
+        ok, reasons = sz.counter_trend_gate("NEUTRAL_TO_BEARISH", "leader", "green", None)
+        self.assertFalse(ok)
+
+    def test_counter_trend_gate_blocks_informed_foreign_sell(self):
+        import sizing_calculator as sz
+        ok, _ = sz.counter_trend_gate("NEUTRAL", "leader", "green", "informed_sustained_sell")
+        self.assertFalse(ok)
+
+    def test_tier8_stop_too_wide_rejected(self):
+        import sizing_calculator as sz
+        out = sz.calculate(
+            ticker="X", mode="swing", tier=8, entry_price=100.0,
+            primary_stop=85.0,  # 15% away -> too wide for a knife
+            atr_pct=1.0, adtv_b_vnd=500.0, sector="banking",
+            portfolio={"nav_total_vnd": 1e9, "total_deployed_pct_nav": 0,
+                       "positions": [], "sector_allocations_pct_nav": {}},
+            nav_deploy_cap_pct=70.0,
+        )
+        self.assertEqual(out["action"], "REJECT")
+        self.assertIn("stop_too_wide", out["reason"])
+
     def test_tier8_hard_capped_small(self):
         import sizing_calculator as sz
         out = sz.calculate(

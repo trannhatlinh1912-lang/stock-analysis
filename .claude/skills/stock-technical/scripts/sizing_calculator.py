@@ -101,10 +101,12 @@ def assign_tier(
             return 3
         if technical_pass:
             return 4
-        # Counter-trend value: cheap + real catalyst but technical not yet
-        # confirmed (e.g. DISTRIBUTION). Allowed as a deliberate falling-knife
-        # entry, but smallest conviction (tier 8 = 0.5x) so size stays tiny.
-        if catalyst_tier in ("hard", "medium") and valuation_pass:
+        # Counter-trend value: cheap + HARD catalyst but technical not yet
+        # confirmed (e.g. DISTRIBUTION). Fighting the chart needs documented
+        # evidence, not a soft thesis — Medium catalyst is NOT enough here
+        # (a wrong thesis + falling chart = the worst kẹp-hàng case). Smallest
+        # conviction (tier 8 = 0.5x). Further gated by counter_trend_gate().
+        if catalyst_tier == "hard" and valuation_pass:
             return 8
         return None
     if mode == "t_plus":
@@ -112,6 +114,39 @@ def assign_tier(
             return 5
         return None
     return None
+
+
+COUNTER_TREND_MAX_STOP_PCT = 8.0  # a knife entry needs a tight stop or no trade
+_BEARISH_REGIMES = {"NEUTRAL_TO_BEARISH", "BEARISH", "CRISIS", "UNKNOWN"}
+
+
+def counter_trend_gate(
+    market_regime: str | None,
+    rs_label: str | None,
+    lai_level: str,
+    foreign_case: str | None = None,
+) -> tuple[bool, list[str]]:
+    """Distinguish a transient-panic dip (catchable) from structural decline
+    (a trap). Tier-8 falling-knife entries are blocked unless conditions look
+    like panic, not deterioration.
+
+      (a) market regime must NOT be bearish — only catch knives when the broad
+          tape isn't itself rolling over.
+      - RS must not be 'laggard' — falling harder than its sector is
+        idiosyncratic weakness (structural), not market-wide panic.
+      - lái must be green.
+      - market-wide foreign must not be an informed sustained sell.
+    """
+    reasons: list[str] = []
+    if market_regime in _BEARISH_REGIMES:
+        reasons.append(f"market regime {market_regime} (catch knives only when tape is firm)")
+    if rs_label == "laggard":
+        reasons.append("RS laggard → idiosyncratic/structural weakness, not panic")
+    if lai_level != "green":
+        reasons.append(f"lái {lai_level}")
+    if foreign_case == "informed_sustained_sell":
+        reasons.append("foreign informed sustained sell")
+    return (len(reasons) == 0, reasons)
 
 
 def atr_scale(atr_pct: float | None, low: float, high: float) -> float:
@@ -181,6 +216,17 @@ def calculate(
         trace["action"] = "REJECT"
         trace["reason"] = "van_tharp_input_invalid"
         return trace
+
+    # Falling-knife discipline: a counter-trend probe needs a tight stop. If the
+    # only available stop is far, the trade is a guess, not a probe — refuse it.
+    if tier == 8 and entry_price and primary_stop:
+        stop_dist_pct = abs(entry_price - primary_stop) / entry_price * 100
+        if stop_dist_pct > COUNTER_TREND_MAX_STOP_PCT:
+            trace["action"] = "REJECT"
+            trace["reason"] = (
+                f"counter_trend_stop_too_wide ({stop_dist_pct:.1f}% > "
+                f"{COUNTER_TREND_MAX_STOP_PCT}%)")
+            return trace
 
     atr_factor = atr_scale(atr_pct, DEFAULT_ATR_PCT_LOW, DEFAULT_ATR_PCT_HIGH)
 
@@ -256,10 +302,14 @@ def calculate(
         "reason": reason,
     })
     if tier == 8 and action == "ENTRY":
+        trace["mode_locked"] = "probe_only"
         trace["warnings"] = [
             "counter_trend_value: technical NOT confirmed (e.g. distribution). "
-            "Falling-knife entry — smallest size (0.5x), tight stop mandatory, "
-            "scale in only on technical confirmation. Do not average down."
+            "Falling-knife PROBE — smallest size (0.5x, capped 4%), tight stop "
+            f"(<= {COUNTER_TREND_MAX_STOP_PCT}%) mandatory.",
+            "mode_locked=probe_only: this is a SWING probe, not a core hold. If "
+            "the stop breaks, CUT — do not convert to 'hold and wait', do not "
+            "average down. Scale up only after technical confirms (tier 3/4).",
         ]
     return trace
 
@@ -325,6 +375,24 @@ def main() -> int:
             }, ensure_ascii=False, indent=2))
             rows.append((t, mode, "-", "REJECT", "no_tier"))
             continue
+
+        # Counter-trend (tier 8) panic-vs-structural gate.
+        if tier == 8:
+            market_regime = (l2 or {}).get("regime")
+            rs_label = tech.get("rs_label") or result_row.get("rs_label")
+            foreign_case = (((l2 or {}).get("pillars") or {})
+                            .get("foreign_cum_20d") or {}).get("case")
+            ok, gate_reasons = counter_trend_gate(market_regime, rs_label, lai_level, foreign_case)
+            if not ok:
+                (out_dir / f"{t}.json").write_text(json.dumps({
+                    "ticker": t, "mode": mode, "tier": 8, "action": "REJECT",
+                    "reason": "counter_trend_blocked",
+                    "gate_reasons": gate_reasons,
+                    "inputs": {"market_regime": market_regime, "rs_label": rs_label,
+                               "lai": lai_level, "foreign_case": foreign_case},
+                }, ensure_ascii=False, indent=2))
+                rows.append((t, mode, "8", "REJECT", "counter_trend_blocked"))
+                continue
 
         entry_price = tech.get("close")
         primary_stop = tech.get("primary_stop")

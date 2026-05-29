@@ -1,0 +1,65 @@
+{
+  "as_of": "2026-05-29",
+  "regime": "NEUTRAL",
+  "confidence_pct": 90,
+  "score": 3,
+  "trend_long_gate_passed": true,
+  "ret_20d_pct": 0.506,
+  "pillars": {
+    "trend_long": {
+      "label": "up",
+      "close": 1863.49,
+      "sma200": 1740.09
+    },
+    "trend_medium": {
+      "label": "up",
+      "sma50": 1801.94
+    },
+    "breadth_vn30": {
+      "label": "strong",
+      "value_pct": 60.0,
+      "caveat": "high breadth historically associated with mean reversion (2024-2026 sample)"
+    },
+    "liquidity": {
+      "label": "missing",
+      "ratio_20d_vs_6m": null
+    },
+    "margin_debt": {
+      "label": "safe",
+      "ratio_pct": 4.44,
+      "manual_status": "fresh"
+    },
+    "foreign_cum_20d": {
+      "label": "data_insufficient",
+      "cum_20d_vnd": null,
+      "n_days": 1,
+      "data_quality": "low",
+      "note": "need 20 distinct days, have 1"
+    },
+    "volatility": {
+      "current_vol": 0.007117,
+      "baseline_mean": 0.012255,
+      "baseline_std": 0.004347,
+      "spike_threshold": 0.018775,
+      "label": "normal",
+      "data_quality": "high",
+      "n_obs": 764
+    }
+  },
+  "missing_pillars": [
+    "liquidity"
+  ],
+  "trading_modes_allowed": [
+    "core",
+    "swing",
+    "t_plus"
+  ],
+  "nav_deploy_cap_pct": 70,
+  "crisis_override_fired": false,
+  "manual_inputs_status": {
+    "margin_debt": {
+      "status": "fresh",
+      "effect": null
+    }
+  }
+}

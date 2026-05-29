@@ -1,0 +1,136 @@
+"""Regression tests locking the L2/L3 regime fixes (2026-05-29/30).
+
+Stdlib unittest only — no pip deps. Run:
+    python3 -m unittest discover -s tests -v
+    STOCK_STRICT=1 python3 -m unittest discover -s tests   # strict raises
+
+Each test reproduces the *actual* bug signature so the fix cannot silently
+regress.
+"""
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from utils.invariants import (  # noqa: E402
+    check_market_regime,
+    check_mean_within_members,
+    check_sector_regime,
+)
+
+
+class TestInvariants(unittest.TestCase):
+    """Pure-function invariants — the safety net itself."""
+
+    def test_mean_within_members_ok(self):
+        # 143 is a valid mean of these members
+        self.assertEqual(check_mean_within_members(143.0, [100.3, 240.4, 106.3], "x"), [])
+
+    def test_mean_below_members_caught(self):
+        v = check_mean_within_members(50.0, [100, 120, 130], "x")
+        self.assertTrue(v)
+
+    def test_sector_basket_ret_outside_member_range_caught(self):
+        # The exact L3 bug: basket -22% while every member is near flat.
+        v = check_sector_regime(
+            {"sector": "banking", "regime": "NEUTRAL_TO_BEARISH",
+             "confidence_pct": 75, "ret_20d_pct": -22.08, "dimensions": {}},
+            member_ret_20d=[5.5, -4.0, 5.9, -0.4, -3.8, 4.7],
+        )
+        self.assertTrue(any("outside member range" in x for x in v))
+
+    def test_sector_basket_ret_within_range_ok(self):
+        v = check_sector_regime(
+            {"sector": "banking", "regime": "NEUTRAL",
+             "confidence_pct": 75, "ret_20d_pct": 0.5, "dimensions": {}},
+            member_ret_20d=[5.5, -4.0, 5.9, -0.4, -3.8, 4.7],
+        )
+        self.assertEqual(v, [])
+
+    def test_foreign_vote_without_history_caught(self):
+        # The L2 bug: a directional vote backed by <20 distinct days.
+        v = check_market_regime(_market_result(foreign={"label": "negative", "n_days": 1}))
+        self.assertTrue(any("foreign votes" in x for x in v))
+
+    def test_foreign_abstain_ok(self):
+        v = check_market_regime(_market_result(
+            foreign={"label": "data_insufficient", "n_days": 1, "cum_20d_vnd": None}))
+        self.assertEqual(v, [])
+
+    def test_breadth_out_of_bounds_caught(self):
+        v = check_market_regime(_market_result(breadth_pct=150.0))
+        self.assertTrue(any("breadth_pct" in x for x in v))
+
+
+class TestForeignPillar(unittest.TestCase):
+    """L2 fix: aggregate net_vnd by DATE, gate on >=20 distinct days."""
+
+    def _run_with_history(self, rows: list[dict]):
+        import market_regime as mr
+        with mock.patch.object(pd, "read_csv", return_value=pd.DataFrame(rows)), \
+             mock.patch("pathlib.Path.exists", return_value=True):
+            return mr._foreign_pillar()
+
+    def test_one_day_many_tickers_is_insufficient(self):
+        # 25 ticker-rows but a SINGLE date — old code mislabelled this 20d.
+        rows = [{"date": "2026-05-29", "ticker": f"T{i}", "net_vnd": -1e6} for i in range(25)]
+        out = self._run_with_history(rows)
+        self.assertEqual(out["label"], "data_insufficient")
+        self.assertEqual(out["n_days"], 1)
+        self.assertIsNone(out["cum_20d_vnd"])
+
+    def test_twenty_distinct_days_votes(self):
+        rows = []
+        for d in range(20):
+            rows.append({"date": f"2026-05-{d+1:02d}", "ticker": "VCB", "net_vnd": 5e6})
+            rows.append({"date": f"2026-05-{d+1:02d}", "ticker": "MBB", "net_vnd": 3e6})
+        out = self._run_with_history(rows)
+        self.assertEqual(out["label"], "positive")
+        self.assertEqual(out["n_days"], 20)
+        self.assertGreater(out["cum_20d_vnd"], 0)
+
+
+class TestBasketAlignment(unittest.TestCase):
+    """L3 fix: inner-join member dates before normalizing + mean."""
+
+    def test_misaligned_members_no_fake_return(self):
+        import sector_regime as sr
+        dates = pd.date_range("2024-01-01", periods=120, freq="D")
+        # Member A full history; member B stale (ends 3 days early) + B starts
+        # later — the union+mean-over-NaN pattern fabricated tail returns.
+        a = pd.DataFrame({"time": dates, "close": [100 + i * 0.1 for i in range(120)]})
+        b = pd.DataFrame({"time": dates[10:-3], "close": [200 + i * 0.2 for i in range(107)]})
+
+        def fake_fetch(sym, start, end):
+            return {"A": a, "B": b}[sym]
+
+        with mock.patch.object(sr, "_fetch_ohlc", side_effect=fake_fetch):
+            df, used = sr._basket_close(["A", "B"], "2024-01-01", "2024-04-30")
+
+        self.assertEqual(set(used), {"A", "B"})
+        # No NaN in aligned member columns (would distort the mean).
+        self.assertFalse(df[["A", "B"]].isna().any().any())
+        # Basket mean within member range at the tail (mean property).
+        last = df.iloc[-1]
+        self.assertGreaterEqual(last["basket"], min(last["A"], last["B"]) - 1e-6)
+        self.assertLessEqual(last["basket"], max(last["A"], last["B"]) + 1e-6)
+
+
+def _market_result(foreign=None, breadth_pct=60.0):
+    pillars = {k: {} for k in ("trend_long", "trend_medium", "breadth_vn30",
+                               "liquidity", "margin_debt", "foreign_cum_20d", "volatility")}
+    pillars["breadth_vn30"] = {"label": "strong", "value_pct": breadth_pct}
+    pillars["foreign_cum_20d"] = foreign or {"label": "data_insufficient", "n_days": 1, "cum_20d_vnd": None}
+    return {"regime": "NEUTRAL", "confidence_pct": 90, "score": 2,
+            "ret_20d_pct": 0.5, "pillars": pillars}
+
+
+if __name__ == "__main__":
+    unittest.main()

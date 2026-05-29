@@ -31,6 +31,7 @@ CONFIGS = ROOT / "configs"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from market_context import _fetch_index, INDEX_SYMBOL  # noqa: E402
+from utils.invariants import check_sector_regime  # noqa: E402
 
 
 def _load_watchlist() -> dict:
@@ -75,14 +76,19 @@ def _basket_close(basket: list[str], start: str, end: str) -> tuple[pd.DataFrame
         df = _fetch_ohlc(sym, start, end)
         if df is None or len(df) < 50:
             continue
-        s = df.set_index("time")["close"]
-        # Normalize to first value (so equal-weight by % return)
-        s_norm = s / s.iloc[0] * 100
-        series[sym] = s_norm
+        series[sym] = df.set_index("time")["close"]
         members_used.append(sym)
     if not series:
         return pd.DataFrame(), []
-    combined = pd.DataFrame(series).dropna(how="all")
+    # Align to common trading dates (inner join) BEFORE normalizing. Members
+    # have different history length / stale tails; with dropna(how="all") +
+    # mean(axis=1) a member dropping out of the mean at the tail shifts the
+    # equal-weight index and fabricates a large fake return. Inner-join first,
+    # then normalize each member to its first value in the aligned window.
+    combined = pd.DataFrame(series).dropna(how="any")
+    if combined.empty:
+        return pd.DataFrame(), members_used
+    combined = combined / combined.iloc[0] * 100
     combined["basket"] = combined.mean(axis=1)
     return combined.reset_index(), members_used
 
@@ -266,7 +272,17 @@ def compute_sector(sector_name: str, basket: list[str], start: str, end: str, vn
             missing_dims.append(k)
     confidence = max(30, 100 - 25 * len(missing_dims))
 
-    return {
+    # Per-member 20d returns for the basket-range invariant (mean must lie
+    # within member returns; violation = misaligned basket like the L3 bug).
+    member_ret_20d = []
+    if not basket_df.empty and len(basket_df) > 21:
+        for col in members_used:
+            if col in basket_df.columns:
+                ser = basket_df[col].dropna()
+                if len(ser) > 21:
+                    member_ret_20d.append((float(ser.iloc[-1]) / float(ser.iloc[-21]) - 1) * 100)
+
+    result = {
         "sector": sector_name,
         "as_of": date.today().isoformat(),
         "regime": state,
@@ -284,6 +300,8 @@ def compute_sector(sector_name: str, basket: list[str], start: str, end: str, vn
         "missing_dimensions": missing_dims,
         "trading_mode_modifiers": MODIFIER[state],
     }
+    check_sector_regime(result, member_ret_20d)
+    return result
 
 
 def main() -> int:

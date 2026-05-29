@@ -40,6 +40,7 @@ from market_context import (  # noqa: E402
     compute_vn30_breadth,
 )
 from utils.manual_loader import load_manual  # noqa: E402
+from utils.invariants import check_market_regime  # noqa: E402
 
 
 def _sma(s: pd.Series, n: int) -> pd.Series:
@@ -142,7 +143,19 @@ def _margin_pillar() -> dict:
 
 
 def _foreign_pillar() -> dict:
-    """Read foreign_history.csv if present, else missing."""
+    """Market foreign-flow pillar from foreign_history.csv.
+
+    foreign_history.csv holds one row per (date, ticker). Aggregate net_vnd by
+    DATE first (sum across tickers = market-wide daily net), then use the last
+    20 DISTINCT trading days. Previously this used tail(20) on raw rows, which
+    grabbed 20 ticker-rows of a single day and mislabelled it as a 20-day
+    cumulative — a thin proxy then voted -1 with full weight.
+
+    Data-quality gate (Guardrail 2): foreign only votes (±1) when ≥20 distinct
+    days exist. With less history it returns 'data_insufficient' → 0 weight,
+    so a low-confidence proxy never drives the regime.
+    """
+    MIN_DAYS = 20
     p = DATA / "foreign_history.csv"
     if not p.exists():
         return {"label": "missing", "cum_20d_vnd": None}
@@ -150,22 +163,27 @@ def _foreign_pillar() -> dict:
         df = pd.read_csv(p)
     except Exception:
         return {"label": "missing", "cum_20d_vnd": None}
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date")
-    if "net_vnd" not in df.columns:
+    if "net_vnd" not in df.columns or "date" not in df.columns:
         return {"label": "missing", "cum_20d_vnd": None}
-    tail = df.tail(20)
-    if len(tail) < 20:
-        return {"label": "missing", "cum_20d_vnd": None, "n_days": len(tail)}
-    cum = float(tail["net_vnd"].sum())
+    df["date"] = pd.to_datetime(df["date"])
+    daily = df.groupby("date")["net_vnd"].sum().sort_index()
+    n_days = int(daily.shape[0])
+    if n_days < MIN_DAYS:
+        return {
+            "label": "data_insufficient",
+            "cum_20d_vnd": None,
+            "n_days": n_days,
+            "data_quality": "low",
+            "note": f"need {MIN_DAYS} distinct days, have {n_days}",
+        }
+    cum = float(daily.tail(MIN_DAYS).sum())
     if cum > 0:
         label = "positive"
     elif cum < 0:
         label = "negative"
     else:
         label = "neutral"
-    return {"label": label, "cum_20d_vnd": cum}
+    return {"label": label, "cum_20d_vnd": cum, "n_days": n_days, "data_quality": "high"}
 
 
 PILLAR_SCORE = {
@@ -173,7 +191,7 @@ PILLAR_SCORE = {
     "breadth":      {"strong": 1, "weak": -1, "neutral": 0, "unknown": 0, "missing": 0},
     "liquidity":    {"rising": 1, "falling": -1, "flat": 0, "missing": 0},
     "margin_debt":  {"safe": 1, "stretched": -1, "elevated": 0, "missing": 0},
-    "foreign":      {"positive": 1, "negative": -1, "neutral": 0, "missing": 0},
+    "foreign":      {"positive": 1, "negative": -1, "neutral": 0, "missing": 0, "data_insufficient": 0},
     "volatility":   {"normal": 0, "elevated": -1, "spike": -2},
 }
 
@@ -293,7 +311,7 @@ def compute_market_regime(start: str, end: str, include_breadth: bool = True) ->
     if margin_effect == "nav_cap_capped_neutral":
         nav_cap = min(nav_cap, REGIME_NAV_CAP["NEUTRAL"])
 
-    return {
+    result = {
         "as_of": last["time"].strftime("%Y-%m-%d"),
         "regime": regime,
         "confidence_pct": confidence,
@@ -321,6 +339,8 @@ def compute_market_regime(start: str, end: str, include_breadth: bool = True) ->
             },
         },
     }
+    check_market_regime(result)
+    return result
 
 
 def main():

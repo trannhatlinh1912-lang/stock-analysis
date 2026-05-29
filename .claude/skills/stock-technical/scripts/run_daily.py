@@ -169,10 +169,13 @@ def build_plan(quick: bool, force: bool) -> list[dict]:
     # GROUP D — daily layer computation
     steps.append({
         "name": "market_regime",
-        "cmd": [py, str(SCRIPTS / "market_regime.py"), "--no-breadth"],
+        # breadth ON: fetches 30 VN30 closes (~30s) but the breadth pillar is a
+        # full ±1 vote; skipping it silently dropped a positive pillar and
+        # biased the regime toward NEUTRAL_TO_BEARISH.
+        "cmd": [py, str(SCRIPTS / "market_regime.py")],
         "critical": True,
         "skip_if_fresh": (DATA / f"market_regime_{today}.json", 1) if not force else None,
-        "timeout": 120,
+        "timeout": 180,
     })
     steps.append({
         "name": "sector_regime",

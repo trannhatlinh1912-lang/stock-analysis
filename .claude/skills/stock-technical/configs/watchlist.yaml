@@ -9,6 +9,7 @@ core:
   banking:
     - MBB
     - VCB
+    - BID
   oil_gas:
     - GAS
     - PLX
@@ -54,7 +55,7 @@ drop:
 
 # Basket members for Layer 3 sector regime (RS basket)
 sector_baskets:
-  banking:     [VCB, MBB, ACB, CTG, TCB]
+  banking:     [VCB, MBB, ACB, CTG, TCB, BID]
   oil_gas:     [BSR, GAS, PLX, PVS, PVD]
   real_estate: [VHM, VIC, KDH, NLG, DXG, NVL]
   steel:       [HPG, HSG, NKG, TLH, SMC]
@@ -69,6 +70,7 @@ all_fetched:
   - ACB
   - CTG
   - TCB
+  - BID
   - BSR
   - GAS
   - PLX

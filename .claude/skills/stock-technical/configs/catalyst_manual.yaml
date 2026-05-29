@@ -1,5 +1,100 @@
 last_updated: '2026-05-29'
 catalysts_by_ticker:
+  MBB:
+  - id: sbv_rate_cut_credit_growth_2026
+    category: 5.1_policy
+    tier: hard
+    direction: bullish
+    description: SBV tiep tuc dieu hanh lai suat theo huong giam (26 NHTM da giam
+      lai suat huy dong 0.1-0.5%/nam ky han 6m+), muc tieu tang truong tin dung 2026
+      ~15%. Ho tro credit volume nganh bank.
+    sources:
+    - https://nhadautu.vn/nhnn-tiep-tuc-dieu-hanh-lai-suat-theo-huong-giam-d104299.html
+    - https://tuoitre.vn/26-ngan-hang-giam-lai-suat-huy-dong-tao-du-dia-ha-lai-vay-20260414163034692.htm
+    - https://sbv.gov.vn/en/w/sbv595011
+    expected_play_date: '2026-06-30'
+    expiration_date: '2026-12-31'
+    extension_allowed: true
+    detected_at: '2026-05-29'
+  - id: dhcd_2026_dividend_25pct
+    category: 5.5_corporate_action
+    tier: hard
+    direction: bullish
+    description: DHCD 18/4/2026 thong qua co tuc 2026 tong 25% (10% tien mat + 15%
+      co phieu). Tang von dieu le len ~102.687 ty. LUU Y dilution counterweight chao
+      ban quyen mua 805.5tr cp @10.000d (gia TT ~25k) + rieng le 200tr cp.
+    sources:
+    - https://doanhnhan.baophapluat.vn/dhdcd-2026-ngan-hang-quan-doi-mbb-chot-muc-tieu-lai-39-400-ty-dong-tang-von-vuot-moc-100-000-ty-va-but-toc-quy-mo-tai-san.html
+    - https://www.vietnamplus.vn/mb-du-kien-tang-von-dieu-le-len-hon-102000-ty-dong-chia-co-tuc-ty-le-25-post1105670.vnp
+    expected_play_date: '2026-07-31'
+    expiration_date: '2026-12-31'
+    extension_allowed: true
+    detected_at: '2026-05-29'
+  - id: dhcd_2026_profit_guidance
+    category: 5.2_earnings
+    tier: medium
+    direction: bullish
+    description: Muc tieu LN 2026 39.400 ty dong +15% YoY (bien do phan dau +20%),
+      DHCD 18/4/2026 thong qua. Guidance chua phai ket qua thuc te.
+    sources:
+    - https://www.tinnhanhchungkhoan.vn/mb-dat-muc-tieu-loi-nhuan-tang-toi-da-20-nam-2026-nang-von-dieu-le-len-hon-102000-ty-dong-post389050.html
+    expected_play_date: '2026-07-31'
+    expiration_date: '2026-10-31'
+    extension_allowed: true
+    detected_at: '2026-05-29'
+  ACB:
+  - id: q1_2026_earnings_beat
+    category: 5.2_earnings
+    tier: hard
+    direction: bullish
+    description: Q1/2026 LNTT 5.400 ty +17% YoY +55% QoQ. Dong luc tu KH doanh nghiep
+      (+6%), DN lon +15%, FDI +43%. Chat luong tai san nhom dan dau.
+    sources:
+    - https://vnexpress.net/acb-lai-5-400-ty-dong-trong-quy-i-2026-5066379.html
+    - https://nld.com.vn/quy-i-2026-loi-nhuan-acb-phuc-hoi-manh-tang-truong-ben-vung-196260424101855289.htm
+    expected_play_date: '2026-07-31'
+    expiration_date: '2026-09-30'
+    extension_allowed: true
+    detected_at: '2026-05-29'
+  - id: dhcd_2026_dividend_20pct
+    category: 5.5_corporate_action
+    tier: hard
+    direction: bullish
+    description: DHCD 2026 ke hoach co tuc 20%, muc tieu LNTT +14% dat 22.269 ty, tin
+      dung/tai san/huy dong +16%.
+    sources:
+    - https://vietnambiz.vn/acb-du-kien-tra-co-tuc-ty-le-20-dat-muc-tieu-tang-truong-loi-nhuan-14-nam-2026-202631484924170.htm
+    expected_play_date: '2026-08-31'
+    expiration_date: '2026-12-31'
+    extension_allowed: true
+    detected_at: '2026-05-29'
+  - id: public_investment_credit_2026
+    category: 5.3_industry_cycle
+    tier: medium
+    direction: bullish
+    description: MBS chon ACB nho kha nang tiep can tin dung cao + ho tro tu thuc day
+      dau tu cong. Tin dung ha tang day manh 2026 vs 2025. THESIS analyst, chua phai
+      su kien hard.
+    sources:
+    - https://vneconomy.vn/du-bao-loi-nhuan-tang-20-dinh-gia-nhom-ngan-hang-da-ve-vung-hap-dan.htm
+    expected_play_date: '2026-12-31'
+    expiration_date: '2027-03-31'
+    extension_allowed: true
+    detected_at: '2026-05-29'
+  CTG:
+  - id: public_investment_credit_2026
+    category: 5.3_industry_cycle
+    tier: medium
+    direction: bullish
+    description: MBS top pick CTG nho tiep can tin dung cao + huong loi day manh dau
+      tu cong, cho vay ha tang/chuoi cung ung. THESIS analyst + macro theme, chua phai
+      su kien hard rieng CTG.
+    sources:
+    - https://vneconomy.vn/du-bao-loi-nhuan-tang-20-dinh-gia-nhom-ngan-hang-da-ve-vung-hap-dan.htm
+    expected_play_date: '2026-12-31'
+    expiration_date: '2027-03-31'
+    extension_allowed: true
+    detected_at: '2026-05-29'
   VCB:
   - id: rate_cut_q3_2026
     category: 5.1_policy

@@ -153,6 +153,46 @@ class TestCalibrateBasket(unittest.TestCase):
         self.assertTrue(kept.issubset(a_valid & b_valid))
 
 
+class TestSizingCounterTrend(unittest.TestCase):
+    """Option-2 swing fix: val + catalyst but no technical = tier 8
+    (counter-trend falling-knife), allowed at a hard-capped tiny size."""
+
+    def test_val_catalyst_no_tech_is_tier8(self):
+        import sizing_calculator as sz
+        self.assertEqual(
+            sz.assign_tier("swing", "hard", valuation_pass=True,
+                           technical_pass=False, lai_level="green"), 8)
+
+    def test_cheap_but_no_catalyst_still_rejected(self):
+        import sizing_calculator as sz
+        # Pure "it's cheap" with no catalyst must NOT get an entry (anti-pattern).
+        self.assertIsNone(
+            sz.assign_tier("swing", None, valuation_pass=True,
+                           technical_pass=False, lai_level="green"))
+
+    def test_tech_confirmed_unchanged(self):
+        import sizing_calculator as sz
+        self.assertEqual(
+            sz.assign_tier("swing", "hard", True, True, "green"), 3)
+        self.assertEqual(
+            sz.assign_tier("swing", None, False, True, "green"), 4)
+
+    def test_tier8_hard_capped_small(self):
+        import sizing_calculator as sz
+        out = sz.calculate(
+            ticker="X", mode="swing", tier=8, entry_price=100.0,
+            primary_stop=99.0,  # tight stop -> large van-tharp base
+            atr_pct=1.0, adtv_b_vnd=500.0, sector="banking",
+            portfolio={"nav_total_vnd": 1e9, "total_deployed_pct_nav": 0,
+                       "positions": [], "sector_allocations_pct_nav": {}},
+            nav_deploy_cap_pct=70.0,
+        )
+        self.assertEqual(out["action"], "ENTRY")
+        self.assertLessEqual(out["final_size_pct_nav"], sz.COUNTER_TREND_CAP_PCT + 1e-6)
+        self.assertEqual(out["binding_constraint"], "counter_trend_cap")
+        self.assertIn("warnings", out)
+
+
 def _market_result(foreign=None, breadth_pct=60.0):
     pillars = {k: {} for k in ("trend_long", "trend_medium", "breadth_vn30",
                                "liquidity", "margin_debt", "foreign_cum_20d", "volatility")}

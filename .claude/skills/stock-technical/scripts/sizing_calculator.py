@@ -48,6 +48,9 @@ MODE_CAP = {"core": 20.0, "swing": 15.0, "t_plus": 10.0}
 SECTOR_CAP_PCT = 50.0
 TICKER_CAP_PCT = 25.0
 CASH_BUFFER_MIN_PCT = 10.0
+# Counter-trend value (tier 8, falling-knife): hard ceiling so a tight ATR
+# stop can't inflate a no-technical entry. Keeps the bet a probe, not a stake.
+COUNTER_TREND_CAP_PCT = 4.0
 
 # Conviction modifier per tier (L8 spec)
 TIER_MODIFIER = {
@@ -58,6 +61,8 @@ TIER_MODIFIER = {
     5: 1.0,   # T+ standard
     6: 0.5,   # Yellow lái
     7: None,  # Red lái — SKIP
+    8: 0.5,   # Swing val + catalyst, NO technical — counter-trend value
+              # ("falling knife"): allowed but smallest size, no chasing.
 }
 
 # Sector ATR thresholds (calibrated v2.5/v2.6 — use defaults if not present)
@@ -96,6 +101,11 @@ def assign_tier(
             return 3
         if technical_pass:
             return 4
+        # Counter-trend value: cheap + real catalyst but technical not yet
+        # confirmed (e.g. DISTRIBUTION). Allowed as a deliberate falling-knife
+        # entry, but smallest conviction (tier 8 = 0.5x) so size stays tiny.
+        if catalyst_tier in ("hard", "medium") and valuation_pass:
+            return 8
         return None
     if mode == "t_plus":
         if technical_pass:
@@ -180,9 +190,17 @@ def calculate(
     # Cap chain (immutable order)
     binding = None
 
+    size_pre = sizes["after_atr"]
+    if tier == 8:
+        size_ct = min(size_pre, COUNTER_TREND_CAP_PCT)
+        if size_ct < size_pre:
+            binding = "counter_trend_cap"
+        size_pre = size_ct
+    sizes["after_counter_trend_cap"] = size_pre
+
     cap_liq = _liquidity_cap(adtv_b_vnd)
-    size_liq = min(sizes["after_atr"], cap_liq)
-    if size_liq < sizes["after_atr"]:
+    size_liq = min(size_pre, cap_liq)
+    if size_liq < size_pre:
         binding = "liquidity"
     sizes["after_liquidity"] = size_liq
 
@@ -237,6 +255,12 @@ def calculate(
         "action": action,
         "reason": reason,
     })
+    if tier == 8 and action == "ENTRY":
+        trace["warnings"] = [
+            "counter_trend_value: technical NOT confirmed (e.g. distribution). "
+            "Falling-knife entry — smallest size (0.5x), tight stop mandatory, "
+            "scale in only on technical confirmation. Do not average down."
+        ]
     return trace
 
 
